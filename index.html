@@ -145,7 +145,8 @@ onAuthStateChanged(auth, async (user) => {
 
   window.currentUser = null;
   window._uid = null;
-}
+ }
+});
   
 // ── Progress ──────────────────────────────────────────
 window.loadProgress = async () => {
@@ -225,8 +226,7 @@ window.loadJournalEntries = async () => {
   window.journalEntries = snap.docs.map(d => ({ id: d.id, ...d.data() }));
   const cnt = document.getElementById("journalCount");
   if (cnt) cnt.textContent = window.journalEntries.length;
-  renderPastEntries();
-};
+App.renderPastEntries();
 
 window.fbSaveJournalEntry = async (text, mood) => {
   if (!window.currentUser) return;
@@ -1361,7 +1361,7 @@ function switchJTab(tab){
   document.querySelectorAll('.j-tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===tab));
   document.getElementById('journalTextarea').style.display=tab==='write'?'block':'none';
   document.getElementById('journalPast').style.display=tab==='past'?'block':'none';
-  if(tab==='past')App.renderPastEntries();
+  if(tab==='past')App.markDone(item, false);
 }
 function closeJournal(){if(jSoundNode){stopSoundNode(jSoundNode);jSoundNode=null;jSoundOn=false;}document.getElementById('journalExp').classList.remove('open');}
 function updateWordCount(){const w=document.getElementById('journalTextarea').value.trim().split(/\s+/).filter(Boolean).length;document.getElementById('wordCount').textContent=w+' words';}
