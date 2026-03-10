@@ -53,7 +53,15 @@ const provider = new GoogleAuthProvider();
 const db = getFirestore(app);
 
 // ── Auth ──────────────────────────────────────────────
-window.fbSignIn = async () => {
+window._fb = {
+  signIn: () => window.fbSignIn(),
+  signOut: () => window.fbSignOut(),
+  saveChecklist: () => window.fbSaveChecklist(),
+  saveJournal: (text, mood='') => window.fbSaveJournalEntry(text, mood),
+  awardXP: (amount, label) => window.awardXP(amount, label)
+};
+  
+  window.fbSignIn = async () => {
   try {
     const result = await signInWithPopup(auth, provider);
     console.log("Signed in:", result.user);
@@ -76,35 +84,30 @@ onAuthStateChanged(auth, async (user) => {
   window.currentUser = user;
 
   if (user) {
-    document.getElementById("loginScreen").style.display = "none";
-    document.getElementById("mainApp").style.display = "block";
+    document.getElementById("profName").textContent = user.displayName || "Bestie";
+document.getElementById("profHandle").textContent =
+  "@" + ((user.email || "").split("@")[0] || "user");
 
-    const bottomNav = document.getElementById("bottomNav");
-    if (bottomNav) bottomNav.style.display = "flex";
+if (user.photoURL) {
+  const welcomeImg = document.getElementById("welcomeAvatarImg");
+  const welcomeEmoji = document.getElementById("welcomeAvatarEmoji");
+  const profImg = document.getElementById("profAvatarImg");
+  const profEmoji = document.getElementById("profAvatarEmoji");
 
-    document.getElementById("profileName").textContent = user.displayName || "Bestie";
-    document.getElementById("profileHandle").textContent =
-      "@" + ((user.email || "").split("@")[0] || "user");
+  if (welcomeImg) {
+    welcomeImg.src = user.photoURL;
+    welcomeImg.style.display = "block";
+  }
+  if (welcomeEmoji) welcomeEmoji.style.display = "none";
 
-    if (user.photoURL) {
-      const smallImg = document.getElementById("profileAvatarImg");
-      const smallEmoji = document.getElementById("profileAvatarEmoji");
-      const largeImg = document.getElementById("profileAvatarImgLarge");
-      const largeEmoji = document.getElementById("profileEmojiLarge");
+  if (profImg) {
+    profImg.src = user.photoURL;
+    profImg.style.display = "block";
+  }
+  if (profEmoji) profEmoji.style.display = "none";
+}
 
-      if (smallImg) {
-        smallImg.src = user.photoURL;
-        smallImg.style.display = "block";
-      }
-      if (smallEmoji) smallEmoji.style.display = "none";
-
-      if (largeImg) {
-        largeImg.src = user.photoURL;
-        largeImg.style.display = "block";
-      }
-      if (largeEmoji) largeEmoji.style.display = "none";
-    }
-
+    
     document.getElementById("welcomeName").textContent =
       ((user.displayName || "Bestie").split(" ")[0]) + "!";
 
@@ -129,8 +132,16 @@ window.loadProgress = async () => {
   if (snap.exists()) {
     const d = snap.data();
     window.userProgress = d;
-    document.getElementById("statSessions").textContent = d.sessions || 0;
-    document.getElementById("statXP").textContent = d.xp || 0;
+   document.getElementById("statSessions").textContent = d.sessions || 0;
+document.getElementById("statXP").textContent = d.xp || 0;
+
+const statSessionsCard = document.getElementById("statSessionsCard");
+const statXPCard = document.getElementById("statXPCard");
+
+if (statSessionsCard) statSessionsCard.textContent = d.sessions || 0;
+if (statXPCard) statXPCard.textContent = d.xp || 0;
+
+    
     document.getElementById("streakNum").textContent = d.streak || 0;
 
     const days = d.streakDays || [];
@@ -144,8 +155,8 @@ window.loadProgress = async () => {
     const xpBar = document.getElementById("xpBar");
     if (xpBar) setTimeout(() => { xpBar.style.width = pct + "%"; }, 400);
 
-    document.getElementById("xpLevelLabel").textContent = `Level ${lvl} — ${xp % 500} / 500 XP to next level`;
-    document.getElementById("progressLevelName").textContent = getLevelName(lvl);
+   document.getElementById("progLevelName").textContent = getLevelName(lvl);
+document.getElementById("progXPLabel").textContent = `${xp % 500} / 500 XP — Level ${lvl}`;
     document.getElementById("welcomeTag").textContent = `✨ Level ${lvl} ${getLevelName(lvl)}`;
   } else {
     window.userProgress = {
@@ -1027,8 +1038,8 @@ document.querySelectorAll('.nav-item').forEach(nav=>{
 });
 
 /* ─── Auth buttons ─────────────────────────────────── */
-document.getElementById('signInBtn').addEventListener('click',()=>window._fb?.signIn());
-document.getElementById('signOutBtn').addEventListener('click',()=>window._fb?.signOut());
+document.getElementById('signInBtn').addEventListener('click', () => window.fbSignIn());
+document.getElementById('signOutBtn').addEventListener('click', () => window.fbSignOut());
 
 /* ─── Home greeting ────────────────────────────────── */
 const hr=new Date().getHours();
