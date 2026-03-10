@@ -1,0 +1,985 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Immy's Wellbeing Studio ✨</title>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Baloo+2:wght@400;600;700;800&family=Caveat:wght@400;600;700&display=swap" rel="stylesheet">
+
+<!-- ═══════════════════════════════════════════════════
+     🔥 FIREBASE CONFIG — PASTE YOUR VALUES HERE
+     ═══════════════════════════════════════════════════ -->
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import {
+  getAuth,
+  GoogleAuthProvider,
+  signInWithPopup,
+  signOut,
+  onAuthStateChanged
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import {
+  getFirestore,
+  doc,
+  getDoc,
+  setDoc,
+  collection,
+  addDoc,
+  getDocs,
+  query,
+  orderBy,
+  serverTimestamp
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+// ─── PASTE YOUR FIREBASE CONFIG OBJECT HERE ───────────
+const firebaseConfig = {
+  apiKey: "AIzaSyAhoL0GYId_4qNW_iFrEKzeuoqeXwTm2wU",
+  authDomain: "immys-wellbeing-studio.firebaseapp.com",
+  projectId: "immys-wellbeing-studio",
+  storageBucket: "immys-wellbeing-studio.firebasestorage.app",
+  messagingSenderId: "867937488617",
+  appId: "1:867937488617:web:d885fba6d7c5b97ef3ea78"
+};
+// ──────────────────────────────────────────────────────
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const provider = new GoogleAuthProvider();
+const db = getFirestore(app);
+
+// ── Auth ──────────────────────────────────────────────
+window.fbSignIn = async () => {
+  try {
+    const result = await signInWithPopup(auth, provider);
+    console.log("Signed in:", result.user);
+  } catch (e) {
+    console.error("Firebase sign-in error:", e);
+    showToast(`Sign-in failed: ${e.code || e.message || "unknown-error"}`);
+  }
+};
+
+window.fbSignOut = async () => {
+  try {
+    await signOut(auth);
+  } catch (e) {
+    console.error("Sign-out error:", e);
+    showToast("Sign-out failed");
+  }
+};
+
+onAuthStateChanged(auth, async (user) => {
+  window.currentUser = user;
+
+  if (user) {
+    document.getElementById("loginScreen").style.display = "none";
+    document.getElementById("mainApp").style.display = "block";
+
+    const bottomNav = document.getElementById("bottomNav");
+    if (bottomNav) bottomNav.style.display = "flex";
+
+    document.getElementById("profileName").textContent = user.displayName || "Bestie";
+    document.getElementById("profileHandle").textContent =
+      "@" + ((user.email || "").split("@")[0] || "user");
+
+    if (user.photoURL) {
+      const smallImg = document.getElementById("profileAvatarImg");
+      const smallEmoji = document.getElementById("profileAvatarEmoji");
+      const largeImg = document.getElementById("profileAvatarImgLarge");
+      const largeEmoji = document.getElementById("profileEmojiLarge");
+
+      if (smallImg) {
+        smallImg.src = user.photoURL;
+        smallImg.style.display = "block";
+      }
+      if (smallEmoji) smallEmoji.style.display = "none";
+
+      if (largeImg) {
+        largeImg.src = user.photoURL;
+        largeImg.style.display = "block";
+      }
+      if (largeEmoji) largeEmoji.style.display = "none";
+    }
+
+    document.getElementById("welcomeName").textContent =
+      ((user.displayName || "Bestie").split(" ")[0]) + "!";
+
+    await loadProgress();
+    await loadJournalEntries();
+    await loadChecklist();
+  } else {
+    document.getElementById("loginScreen").style.display = "flex";
+    document.getElementById("mainApp").style.display = "none";
+
+    const bottomNav = document.getElementById("bottomNav");
+    if (bottomNav) bottomNav.style.display = "none";
+  }
+});
+
+// ── Progress ──────────────────────────────────────────
+window.loadProgress = async () => {
+  if (!window.currentUser) return;
+  const ref = doc(db, "users", window.currentUser.uid, "data", "progress");
+  const snap = await getDoc(ref);
+
+  if (snap.exists()) {
+    const d = snap.data();
+    window.userProgress = d;
+    document.getElementById("statSessions").textContent = d.sessions || 0;
+    document.getElementById("statXP").textContent = d.xp || 0;
+    document.getElementById("streakNum").textContent = d.streak || 0;
+
+    const days = d.streakDays || [];
+    document.querySelectorAll(".streak-day").forEach((el, i) => {
+      el.classList.toggle("filled", days[i] === true);
+    });
+
+    const xp = d.xp || 0;
+    const lvl = Math.floor(xp / 500) + 1;
+    const pct = Math.round(((xp % 500) / 500) * 100);
+    const xpBar = document.getElementById("xpBar");
+    if (xpBar) setTimeout(() => { xpBar.style.width = pct + "%"; }, 400);
+
+    document.getElementById("xpLevelLabel").textContent = `Level ${lvl} — ${xp % 500} / 500 XP to next level`;
+    document.getElementById("progressLevelName").textContent = getLevelName(lvl);
+    document.getElementById("welcomeTag").textContent = `✨ Level ${lvl} ${getLevelName(lvl)}`;
+  } else {
+    window.userProgress = {
+      sessions: 0,
+      xp: 0,
+      streak: 0,
+      streakDays: [false, false, false, false, false, false, false]
+    };
+    await saveProgress();
+  }
+};
+
+window.saveProgress = async () => {
+  if (!window.currentUser) return;
+  const ref = doc(db, "users", window.currentUser.uid, "data", "progress");
+  await setDoc(ref, window.userProgress, { merge: true });
+};
+
+window.awardXP = async (amount, label) => {
+  if (!window.currentUser) return;
+  window.userProgress.xp = (window.userProgress.xp || 0) + amount;
+  window.userProgress.sessions = (window.userProgress.sessions || 0) + 1;
+  await saveProgress();
+  await loadProgress();
+  showToast(`🌟 +${amount} XP — ${label}`);
+};
+
+function getLevelName(lvl) {
+  const names = [
+    "Beginner Petal","Mindful Seed","Calm Sprout","Zen Flower","Zen Star",
+    "Peace Warrior","Soul Glower","Harmony Master","Enlightened One","Cosmic Yogi"
+  ];
+  return names[Math.min(lvl - 1, names.length - 1)];
+}
+
+// ── Journal ───────────────────────────────────────────
+window.loadJournalEntries = async () => {
+  if (!window.currentUser) return;
+  const ref = collection(db, "users", window.currentUser.uid, "journal");
+  const q = query(ref, orderBy("createdAt", "desc"));
+  const snap = await getDocs(q);
+  window.journalEntries = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  const cnt = document.getElementById("journalCount");
+  if (cnt) cnt.textContent = window.journalEntries.length;
+  renderPastEntries();
+};
+
+window.fbSaveJournalEntry = async (text, mood) => {
+  if (!window.currentUser) return;
+  const ref = collection(db, "users", window.currentUser.uid, "journal");
+  await addDoc(ref, {
+    text,
+    mood: mood || "",
+    createdAt: serverTimestamp(),
+    dateLabel: new Date().toLocaleDateString("en-GB", {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      year: "numeric"
+    })
+  });
+  await loadJournalEntries();
+  await awardXP(15, "Journal entry saved!");
+};
+
+
+// ── Checklist ─────────────────────────────────────────
+window.loadChecklist = async () => {
+  if (!window.currentUser) return;
+  const today = new Date().toISOString().split("T")[0];
+  const ref = doc(db, "users", window.currentUser.uid, "checklist", today);
+  const snap = await getDoc(ref);
+
+  if (snap.exists()) {
+    const done = snap.data().done || [];
+    document.querySelectorAll(".activity-item").forEach((item, i) => {
+      if (done.includes(i)) markActivityDone(item, false);
+    });
+  }
+};
+
+window.fbSaveChecklist = async () => {
+  if (!window.currentUser) return;
+  const today = new Date().toISOString().split("T")[0];
+  const done = [];
+  document.querySelectorAll(".activity-item").forEach((item, i) => {
+    if (item.classList.contains("done")) done.push(i);
+  });
+  const ref = doc(db, "users", window.currentUser.uid, "checklist", today);
+  await setDoc(ref, { done, date: today });
+};
+
+window.fbMarkSessionComplete = async (type, xp) => {
+  await awardXP(xp, `${type} session complete!`);
+};
+</script>
+
+
+<style>
+:root{--soft-dark:#3d3250;--card-bg:rgba(255,255,255,.78);--purple:#c084fc;--pink:#f472b6;--muted:#b09ac0}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Nunito',sans-serif;background:#fdf6ff;color:var(--soft-dark);min-height:100vh;overflow-x:hidden}
+
+/* BG */
+.bg-blobs{position:fixed;inset:0;z-index:0;overflow:hidden;pointer-events:none}
+.blob{position:absolute;border-radius:50%;filter:blur(70px);opacity:.28;animation:blobFloat 9s ease-in-out infinite alternate}
+.blob-1{width:500px;height:500px;background:#ffd6e7;top:-150px;left:-100px}
+.blob-2{width:400px;height:400px;background:#c8f0e8;top:200px;right:-120px;animation-delay:2s}
+.blob-3{width:350px;height:350px;background:#d4c8f8;bottom:-80px;left:30%;animation-delay:4s}
+.blob-4{width:280px;height:280px;background:#fff0b8;top:55%;left:5%;animation-delay:1.5s}
+@keyframes blobFloat{0%{transform:translate(0,0) scale(1)}100%{transform:translate(25px,18px) scale(1.07)}}
+.sparkles{position:fixed;inset:0;z-index:0;pointer-events:none}
+.sparkle{position:absolute;font-size:1.1rem;opacity:0;animation:sparkleFade 4s ease-in-out infinite}
+@keyframes sparkleFade{0%,100%{opacity:0;transform:scale(.5) rotate(0)}50%{opacity:.6;transform:scale(1.2) rotate(20deg)}}
+
+/* ═══ LOGIN SCREEN ═══ */
+#loginScreen{position:fixed;inset:0;z-index:1000;background:linear-gradient(160deg,#1a0a2e,#2d1b4e,#1a2040);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 24px}
+.login-logo{font-size:5rem;margin-bottom:16px;animation:bounce 2s ease-in-out infinite}
+@keyframes bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
+.login-title{font-family:'Baloo 2',cursive;font-size:2.2rem;font-weight:800;background:linear-gradient(135deg,#c084fc,#f472b6,#fb923c);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;text-align:center;margin-bottom:8px}
+.login-sub{font-size:.9rem;color:rgba(255,255,255,.6);font-weight:600;text-align:center;margin-bottom:48px;line-height:1.6}
+.google-btn{display:flex;align-items:center;gap:12px;background:white;border:none;border-radius:999px;padding:14px 28px;font-family:'Nunito',sans-serif;font-size:1rem;font-weight:800;color:#3d3250;cursor:pointer;box-shadow:0 4px 24px rgba(0,0,0,.3);transition:all .2s cubic-bezier(.34,1.56,.64,1)}
+.google-btn:hover{transform:scale(1.05) translateY(-2px);box-shadow:0 8px 32px rgba(0,0,0,.4)}
+.google-icon{width:22px;height:22px}
+.login-footer{margin-top:32px;font-size:.72rem;color:rgba(255,255,255,.3);text-align:center;max-width:280px;line-height:1.6}
+
+/* ═══ MAIN APP ═══ */
+#mainApp{display:none}
+.page{display:none;position:relative;z-index:1;max-width:480px;margin:0 auto;padding:0 16px 100px;animation:pageIn .35s ease both}
+.page.active{display:block}
+@keyframes pageIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+
+/* NAV */
+.bottom-nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:480px;z-index:100;background:rgba(255,255,255,.9);backdrop-filter:blur(20px);border-top:1.5px solid rgba(200,160,240,.2);display:flex;justify-content:space-around;padding:10px 0 16px;box-shadow:0 -8px 32px rgba(180,120,200,.1)}
+.nav-item{display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;padding:4px 10px;border-radius:14px;transition:all .2s}
+.nav-item:hover{background:rgba(200,160,240,.12)}
+.nav-icon{font-size:1.45rem;transition:transform .25s cubic-bezier(.34,1.56,.64,1)}
+.nav-label{font-size:.62rem;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.nav-item.active .nav-label{color:#c084fc}
+.nav-item.active .nav-icon{transform:scale(1.2) translateY(-2px)}
+
+@keyframes fadeUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
+@keyframes slideDown{from{transform:translateY(-35px);opacity:0}to{transform:translateY(0);opacity:1}}
+@keyframes pop{from{transform:scale(.8);opacity:0}to{transform:scale(1);opacity:1}}
+@keyframes wiggle{0%,100%{transform:rotate(-5deg)}50%{transform:rotate(5deg)}}
+@keyframes flicker{0%{transform:scale(1) rotate(-5deg)}100%{transform:scale(1.1) rotate(5deg)}}
+@keyframes spinRing{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+@keyframes pulseGlow{0%,100%{box-shadow:0 0 20px rgba(192,132,252,.3)}50%{box-shadow:0 0 50px rgba(192,132,252,.7)}}
+@keyframes poseFloat{0%{transform:translateY(0) scale(1)}100%{transform:translateY(-8px) scale(1.03)}}
+
+.section{margin-bottom:24px}
+.section-label{font-family:'Baloo 2',cursive;font-size:.78rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:12px;padding-left:4px}
+
+/* HOME */
+.home-header{text-align:center;padding:28px 0 18px;animation:slideDown .5s cubic-bezier(.34,1.56,.64,1)}
+.logo-badge{display:inline-flex;align-items:center;gap:10px;background:white;border-radius:999px;padding:9px 18px;box-shadow:0 4px 20px rgba(180,120,200,.15);border:2px solid rgba(200,160,240,.3);margin-bottom:12px}
+.logo-emoji{font-size:1.5rem;animation:bounce 2s ease-in-out infinite}
+.logo-text{font-family:'Baloo 2',cursive;font-size:.82rem;font-weight:700;color:#9b72d0;letter-spacing:.05em;text-transform:uppercase}
+.home-header h1{font-family:'Baloo 2',cursive;font-size:2rem;font-weight:800;line-height:1.1;background:linear-gradient(135deg,#c084fc,#f472b6,#fb923c);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:5px}
+.home-header p{font-size:.88rem;color:var(--muted);font-weight:600}
+.welcome-banner{background:linear-gradient(135deg,#f5d0fe,#fce7f3,#ddd6fe);border-radius:24px;padding:20px;margin-bottom:24px;display:flex;align-items:center;gap:16px;border:2px solid rgba(255,255,255,.7);box-shadow:0 8px 28px rgba(192,132,252,.18);animation:fadeUp .4s ease both}
+.welcome-avatar-wrap{width:62px;height:62px;border-radius:20px;background:linear-gradient(135deg,#c084fc,#f472b6);display:flex;align-items:center;justify-content:center;font-size:2rem;flex-shrink:0;box-shadow:0 4px 14px rgba(192,132,252,.35);overflow:hidden;position:relative}
+.welcome-avatar-wrap img{width:100%;height:100%;object-fit:cover;display:none;border-radius:20px}
+.welcome-text h2{font-family:'Baloo 2',cursive;font-size:1.15rem;font-weight:800;color:var(--soft-dark)}
+.welcome-text p{font-size:.78rem;font-weight:600;color:#9b72d0;margin-top:2px}
+.welcome-tag{display:inline-block;background:rgba(255,255,255,.7);border-radius:999px;padding:3px 10px;font-size:.68rem;font-weight:800;color:#c084fc;margin-top:6px;border:1.5px solid rgba(192,132,252,.2)}
+.stats-row{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:24px}
+.stat-card{background:var(--card-bg);border-radius:18px;padding:14px 10px;text-align:center;border:2px solid rgba(255,255,255,.6);box-shadow:0 4px 14px rgba(0,0,0,.06);animation:fadeUp .4s ease both}
+.stat-icon{font-size:1.6rem;margin-bottom:4px}
+.stat-num{font-family:'Baloo 2',cursive;font-size:1.4rem;font-weight:900;color:var(--soft-dark);line-height:1}
+.stat-lbl{font-size:.64rem;font-weight:700;color:var(--muted)}
+.streak-card{background:linear-gradient(135deg,#fff3d4,#ffe8d4);border-radius:22px;padding:16px 18px;display:flex;align-items:center;gap:14px;border:2px solid rgba(255,200,100,.3);box-shadow:0 6px 20px rgba(255,160,60,.1);animation:fadeUp .4s ease both}
+.streak-flame{font-size:2.3rem;animation:flicker 1.5s ease-in-out infinite alternate}
+.streak-info{flex:1}
+.streak-num{font-family:'Baloo 2',cursive;font-size:1.7rem;font-weight:900;color:#f97316;line-height:1}
+.streak-label{font-size:.76rem;font-weight:700;color:#f59460}
+.streak-days{display:flex;gap:4px}
+.streak-day{width:26px;height:26px;border-radius:7px;background:rgba(255,200,100,.3);display:flex;align-items:center;justify-content:center;font-size:.6rem;font-weight:800;color:#f59460}
+.streak-day.filled{background:linear-gradient(135deg,#fb923c,#f97316);color:white}
+.mood-card{background:var(--card-bg);backdrop-filter:blur(12px);border-radius:24px;padding:20px;border:2px solid rgba(200,160,240,.2);box-shadow:0 8px 28px rgba(180,120,200,.1);animation:fadeUp .4s ease both}
+.mood-question{font-family:'Baloo 2',cursive;font-size:1.1rem;font-weight:700;color:var(--soft-dark);margin-bottom:14px;text-align:center}
+.mood-row{display:flex;justify-content:space-between;gap:5px}
+.mood-btn{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;background:rgba(255,255,255,.6);border:2px solid transparent;border-radius:16px;padding:9px 4px;cursor:pointer;transition:all .2s cubic-bezier(.34,1.56,.64,1);font-family:'Nunito',sans-serif}
+.mood-btn:hover{transform:translateY(-3px) scale(1.08)}
+.mood-btn.active{border-color:#c084fc;background:white;transform:translateY(-4px) scale(1.1);box-shadow:0 8px 22px rgba(192,132,252,.3)}
+.mood-icon{font-size:1.7rem}
+.mood-label{font-size:.6rem;font-weight:700;color:var(--muted)}
+.mood-response{margin-top:12px;padding:12px 14px;border-radius:14px;background:linear-gradient(135deg,rgba(212,184,240,.3),rgba(184,240,224,.3));font-size:.85rem;font-weight:600;color:var(--soft-dark);text-align:center;display:none}
+.mood-response.visible{display:block;animation:pop .3s cubic-bezier(.34,1.56,.64,1)}
+.affirmation-card{background:linear-gradient(135deg,#fce8f8,#f0e8ff,#e8f4ff);border-radius:24px;padding:22px;text-align:center;border:2px solid rgba(220,180,255,.3);box-shadow:0 8px 28px rgba(180,120,200,.12);animation:fadeUp .4s ease both}
+.affirmation-emoji{font-size:2.3rem;margin-bottom:8px;display:block;animation:wiggle 3s ease-in-out infinite}
+.affirmation-text{font-family:'Baloo 2',cursive;font-size:1.1rem;font-weight:800;color:var(--soft-dark);line-height:1.4;margin-bottom:12px}
+.affirmation-btn{background:rgba(255,255,255,.7);border:2px solid rgba(200,160,240,.3);border-radius:999px;padding:7px 20px;font-family:'Nunito',sans-serif;font-size:.78rem;font-weight:800;color:#9b72d0;cursor:pointer;transition:all .2s}
+.affirmation-btn:hover{background:white;transform:scale(1.06)}
+.actions-grid{display:grid;grid-template-columns:1fr 1fr;gap:11px}
+.action-card{border-radius:20px;padding:18px 14px;cursor:pointer;transition:all .25s cubic-bezier(.34,1.56,.64,1);border:2px solid rgba(255,255,255,.6);box-shadow:0 4px 14px rgba(0,0,0,.07);animation:fadeUp .4s ease both;position:relative;overflow:hidden}
+.action-card:hover{transform:translateY(-4px) scale(1.03)}
+.action-card:active{transform:scale(.97)}
+.action-card.yoga{background:linear-gradient(135deg,#fde8f0,#fbd5e6)}
+.action-card.meditate{background:linear-gradient(135deg,#e0d4f8,#cfc0f5)}
+.action-card.breathe{background:linear-gradient(135deg,#d4f0f8,#bde8f5)}
+.action-card.journal{background:linear-gradient(135deg,#fef0d4,#fde8b8)}
+.action-emoji{font-size:2rem;margin-bottom:7px;display:block}
+.action-title{font-family:'Baloo 2',cursive;font-size:.95rem;font-weight:800;color:var(--soft-dark);margin-bottom:2px}
+.action-sub{font-size:.7rem;font-weight:600;color:var(--muted)}
+.activity-list{display:flex;flex-direction:column;gap:9px}
+.activity-item{background:var(--card-bg);backdrop-filter:blur(12px);border-radius:16px;padding:13px 15px;display:flex;align-items:center;gap:12px;border:2px solid rgba(255,255,255,.6);box-shadow:0 3px 12px rgba(0,0,0,.05);cursor:pointer;transition:all .2s cubic-bezier(.34,1.56,.64,1)}
+.activity-item:hover{transform:translateX(4px)}
+.activity-dot{width:40px;height:40px;border-radius:13px;display:flex;align-items:center;justify-content:center;font-size:1.3rem;flex-shrink:0}
+.activity-info{flex:1}
+.activity-name{font-weight:800;font-size:.88rem;color:var(--soft-dark)}
+.activity-time{font-size:.7rem;font-weight:600;color:var(--muted);margin-top:1px}
+.activity-check{width:24px;height:24px;border-radius:50%;border:2.5px solid #d4c0f0;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .3s cubic-bezier(.34,1.56,.64,1)}
+
+/* FULLSCREEN EXPERIENCES */
+.exp-overlay{position:fixed;inset:0;z-index:500;display:flex;flex-direction:column;opacity:0;pointer-events:none;transition:opacity .4s ease}
+.exp-overlay.open{opacity:1;pointer-events:all}
+.exp-close{position:absolute;top:20px;right:20px;background:rgba(255,255,255,.2);border:none;border-radius:50%;width:40px;height:40px;font-size:1.1rem;color:white;cursor:pointer;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);z-index:10;transition:all .2s}
+.exp-close:hover{background:rgba(255,255,255,.35);transform:scale(1.1)}
+
+/* BREATHWORK */
+#breathExp{background:linear-gradient(160deg,#1a0a2e,#2d1b4e,#1a2a4e)}
+.breath-scene{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 24px;position:relative}
+.breath-rings{position:relative;width:220px;height:220px;margin-bottom:32px}
+.breath-ring{position:absolute;inset:0;border-radius:50%;border:2px solid rgba(192,132,252,.3);animation:breathRingPulse 4s ease-in-out infinite}
+.breath-ring:nth-child(2){animation-delay:.5s;border-color:rgba(244,114,182,.2)}
+.breath-ring:nth-child(3){animation-delay:1s;border-color:rgba(251,146,60,.15)}
+@keyframes breathRingPulse{0%,100%{transform:scale(1);opacity:.3}50%{transform:scale(1.4);opacity:.8}}
+.breath-core{position:absolute;inset:30px;border-radius:50%;background:radial-gradient(circle,rgba(255,255,255,.15),rgba(192,132,252,.25));display:flex;align-items:center;justify-content:center;font-size:3.5rem;transition:transform .5s ease;border:1.5px solid rgba(255,255,255,.1)}
+.breath-phase-label{font-family:'Baloo 2',cursive;font-size:1.6rem;font-weight:800;color:white;margin-bottom:8px;text-align:center;min-height:2rem}
+.breath-counter{font-size:3.5rem;font-weight:900;font-family:'Baloo 2',cursive;color:white;line-height:1;margin-bottom:4px;text-shadow:0 0 30px rgba(192,132,252,.8)}
+.breath-sub{font-size:.85rem;color:rgba(255,255,255,.6);font-weight:600;margin-bottom:32px}
+.breath-pattern-row{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-bottom:16px}
+.breath-pat-btn{padding:7px 14px;border-radius:999px;border:2px solid rgba(255,255,255,.2);background:rgba(255,255,255,.07);color:rgba(255,255,255,.7);font-family:'Nunito',sans-serif;font-size:.75rem;font-weight:800;cursor:pointer;transition:all .2s;white-space:nowrap}
+.breath-pat-btn.active{background:rgba(192,132,252,.4);border-color:#c084fc;color:white}
+.breath-controls{display:flex;gap:12px;align-items:center}
+.breath-main-btn{background:linear-gradient(135deg,#c084fc,#f472b6);color:white;border:none;border-radius:999px;padding:14px 36px;font-family:'Baloo 2',cursive;font-size:1.05rem;font-weight:800;cursor:pointer;box-shadow:0 4px 20px rgba(192,132,252,.5);transition:all .2s}
+.breath-main-btn:hover{transform:scale(1.05)}
+.sound-btn{width:44px;height:44px;border-radius:50%;border:2px solid rgba(255,255,255,.2);background:rgba(255,255,255,.08);color:rgba(255,255,255,.8);font-size:1.1rem;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s}
+.sound-btn.on{background:rgba(192,132,252,.3);border-color:#c084fc}
+.round-track{display:flex;gap:6px;margin-top:20px}
+.round-dot{width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,.2);transition:all .3s}
+.round-dot.done{background:#c084fc}
+.round-dot.current{background:white}
+
+/* YOGA */
+#yogaExp{background:linear-gradient(160deg,#1a2a1a,#2a3a20,#1a2a30)}
+.yoga-header{padding:60px 24px 16px;text-align:center}
+.yoga-class-name{font-family:'Baloo 2',cursive;font-size:1.5rem;font-weight:800;color:white;margin-bottom:4px}
+.yoga-progress-bar{background:rgba(255,255,255,.15);border-radius:999px;height:5px;margin:16px 24px;overflow:hidden}
+.yoga-progress-fill{height:100%;background:linear-gradient(90deg,#a3e8cc,#60d4b0);border-radius:999px;transition:width .6s ease}
+.yoga-main{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 24px 20px}
+.yoga-pose-art{width:160px;height:160px;border-radius:40px;background:rgba(255,255,255,.07);display:flex;align-items:center;justify-content:center;font-size:5.5rem;margin-bottom:20px;border:1.5px solid rgba(255,255,255,.12);animation:poseFloat 3s ease-in-out infinite alternate}
+.yoga-pose-name{font-family:'Baloo 2',cursive;font-size:1.5rem;font-weight:800;color:white;margin-bottom:6px;text-align:center}
+.yoga-pose-cue{font-size:.88rem;color:rgba(255,255,255,.7);font-weight:600;text-align:center;max-width:280px;line-height:1.5;margin-bottom:20px}
+.yoga-timer-ring{position:relative;width:90px;height:90px;margin-bottom:16px}
+.yoga-timer-svg{transform:rotate(-90deg);width:90px;height:90px}
+.yoga-timer-bg{fill:none;stroke:rgba(255,255,255,.1);stroke-width:6}
+.yoga-timer-arc{fill:none;stroke:#a3e8cc;stroke-width:6;stroke-linecap:round;transition:stroke-dashoffset .5s linear}
+.yoga-timer-num{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:'Baloo 2',cursive;font-size:1.5rem;font-weight:800;color:white}
+.yoga-step-info{font-size:.75rem;color:rgba(255,255,255,.5);font-weight:700;margin-bottom:16px;text-align:center}
+.yoga-btn-row{display:flex;gap:12px}
+.yoga-action-btn{flex:1;padding:13px;border-radius:16px;border:2px solid rgba(255,255,255,.2);background:rgba(255,255,255,.08);color:white;font-family:'Baloo 2',cursive;font-size:.92rem;font-weight:800;cursor:pointer;transition:all .2s}
+.yoga-action-btn.primary{background:linear-gradient(135deg,#a3e8cc,#60d4b0);border-color:transparent;color:#1a3a2a}
+.yoga-sound-row{display:flex;gap:8px;margin-top:14px;justify-content:center}
+.yoga-sound-chip{padding:6px 14px;border-radius:999px;border:1.5px solid rgba(255,255,255,.15);background:rgba(255,255,255,.06);color:rgba(255,255,255,.6);font-size:.72rem;font-weight:800;cursor:pointer;transition:all .2s;font-family:'Nunito',sans-serif}
+.yoga-sound-chip.on{background:rgba(163,232,204,.2);border-color:#a3e8cc;color:#a3e8cc}
+
+/* MEDITATION */
+#meditateExp{background:linear-gradient(160deg,#0f1a2e,#1a1040,#0a1a2a)}
+.med-scene{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 24px;position:relative;overflow:hidden}
+.med-particles{position:absolute;inset:0;pointer-events:none}
+.med-particle{position:absolute;border-radius:50%;animation:medFloat linear infinite}
+@keyframes medFloat{0%{transform:translateY(100vh) scale(0);opacity:0}20%{opacity:.6}80%{opacity:.4}100%{transform:translateY(-100px) scale(1);opacity:0}}
+.med-orb{width:190px;height:190px;border-radius:50%;background:radial-gradient(circle,rgba(100,80,200,.4),rgba(50,30,120,.6),transparent);display:flex;align-items:center;justify-content:center;font-size:4rem;margin-bottom:24px;animation:pulseGlow 4s ease-in-out infinite;position:relative}
+.med-orb-ring{position:absolute;inset:-20px;border-radius:50%;border:1px solid rgba(192,132,252,.2);animation:spinRing 8s linear infinite}
+.med-orb-ring2{position:absolute;inset:-40px;border-radius:50%;border:1px solid rgba(192,132,252,.1);animation:spinRing 12s linear infinite reverse}
+.med-title{font-family:'Baloo 2',cursive;font-size:1.4rem;font-weight:800;color:white;margin-bottom:8px;text-align:center}
+.med-guide{font-size:.88rem;color:rgba(255,255,255,.65);font-weight:600;text-align:center;max-width:300px;line-height:1.6;margin-bottom:24px;min-height:60px;transition:opacity .5s}
+.med-duration-row{display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;justify-content:center}
+.med-dur-btn{padding:8px 16px;border-radius:999px;border:2px solid rgba(255,255,255,.15);background:rgba(255,255,255,.06);color:rgba(255,255,255,.6);font-size:.78rem;font-weight:800;cursor:pointer;transition:all .2s;font-family:'Nunito',sans-serif}
+.med-dur-btn.active{background:rgba(192,132,252,.3);border-color:#c084fc;color:white}
+.med-time-display{font-family:'Baloo 2',cursive;font-size:3rem;font-weight:800;color:white;margin-bottom:6px;text-shadow:0 0 30px rgba(192,132,252,.6)}
+.med-time-label{font-size:.78rem;color:rgba(255,255,255,.5);font-weight:600;margin-bottom:20px}
+.med-sound-grid{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-bottom:20px}
+.med-sound-card{padding:8px 14px;border-radius:14px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05);color:rgba(255,255,255,.6);font-size:.75rem;font-weight:800;cursor:pointer;transition:all .2s;font-family:'Nunito',sans-serif;display:flex;align-items:center;gap:6px}
+.med-sound-card.on{background:rgba(192,132,252,.25);border-color:#c084fc;color:white}
+.med-main-btn{background:linear-gradient(135deg,#c084fc,#818cf8);color:white;border:none;border-radius:999px;padding:14px 40px;font-family:'Baloo 2',cursive;font-size:1.05rem;font-weight:800;cursor:pointer;box-shadow:0 4px 24px rgba(192,132,252,.5);transition:all .2s}
+.med-main-btn:hover{transform:scale(1.05)}
+
+/* JOURNAL */
+#journalExp{background:linear-gradient(160deg,#2a1a10,#3a2810,#2a1a20)}
+.journal-header{padding:56px 20px 12px;display:flex;align-items:center;gap:12px}
+.journal-title-area{flex:1}
+.journal-date-label{font-size:.75rem;color:rgba(255,220,180,.5);font-weight:700;text-transform:uppercase;letter-spacing:.08em}
+.journal-entry-title{font-family:'Baloo 2',cursive;font-size:1.3rem;font-weight:800;color:rgba(255,220,180,.9)}
+.journal-prompts{padding:0 20px 12px;display:flex;gap:8px;overflow-x:auto;scrollbar-width:none}
+.journal-prompts::-webkit-scrollbar{display:none}
+.prompt-chip{flex-shrink:0;padding:7px 14px;border-radius:999px;border:1.5px solid rgba(255,200,120,.2);background:rgba(255,200,120,.06);color:rgba(255,200,120,.7);font-size:.72rem;font-weight:800;cursor:pointer;transition:all .2s;font-family:'Nunito',sans-serif}
+.prompt-chip:hover{background:rgba(255,200,120,.15);color:rgba(255,220,150,.9)}
+.journal-paper{flex:1;margin:0 16px 16px;border-radius:20px;background:rgba(255,250,240,.95);position:relative;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 8px 40px rgba(0,0,0,.4)}
+.journal-paper::before{content:'';position:absolute;left:52px;top:0;bottom:0;width:1.5px;background:rgba(255,150,150,.3);z-index:1}
+.paper-lines{position:absolute;inset:0;pointer-events:none;z-index:0}
+.journal-mode-tabs{display:flex;padding:12px 16px 0;gap:8px;position:relative;z-index:2}
+.j-tab{padding:6px 14px;border-radius:10px 10px 0 0;font-size:.75rem;font-weight:800;cursor:pointer;transition:all .2s;font-family:'Nunito',sans-serif;color:#b09060;border:1.5px solid rgba(180,140,80,.2);border-bottom:none;background:rgba(255,240,210,.5)}
+.j-tab.active{background:rgba(255,250,240,.98);color:#7a4a20;border-color:rgba(180,140,80,.3)}
+.journal-textarea{flex:1;border:none;outline:none;background:transparent;padding:8px 16px 16px 68px;font-family:'Caveat',cursive;font-size:1.2rem;color:#5a3a20;line-height:2.2;resize:none;z-index:2;position:relative;min-height:220px}
+.journal-textarea::placeholder{color:rgba(180,140,100,.5)}
+.journal-past{padding:8px 16px 16px 68px;overflow-y:auto;flex:1;z-index:2;position:relative;display:none;min-height:220px}
+.past-entry{margin-bottom:16px;padding-bottom:16px;border-bottom:1px dashed rgba(180,140,80,.2)}
+.past-entry-date{font-size:.7rem;font-weight:700;color:#b09060;margin-bottom:4px}
+.past-entry-text{font-family:'Caveat',cursive;font-size:1.05rem;color:#5a3a20;line-height:1.8;white-space:pre-wrap}
+.journal-toolbar{display:flex;align-items:center;gap:8px;padding:10px 16px;border-top:1px solid rgba(180,140,80,.15);position:relative;z-index:2;background:rgba(255,245,225,.8);flex-wrap:wrap}
+.j-tool-btn{width:34px;height:34px;border-radius:10px;border:1.5px solid rgba(180,140,80,.2);background:rgba(255,240,200,.5);color:#a07840;cursor:pointer;font-size:1rem;display:flex;align-items:center;justify-content:center;transition:all .2s}
+.j-tool-btn:hover{background:rgba(255,230,180,.8);transform:scale(1.08)}
+.j-save-btn{background:linear-gradient(135deg,#f59e0b,#f97316);color:white;border:none;border-radius:999px;padding:8px 18px;font-family:'Baloo 2',cursive;font-size:.85rem;font-weight:800;cursor:pointer;transition:all .2s}
+.j-save-btn:hover{transform:scale(1.05)}
+.j-word-count{font-size:.7rem;color:#b09060;font-weight:700}
+
+/* CLASSES */
+.page-header{padding:28px 0 20px;animation:slideDown .4s ease both}
+.page-title{font-family:'Baloo 2',cursive;font-size:1.8rem;font-weight:800;background:linear-gradient(135deg,#c084fc,#f472b6);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.page-sub{font-size:.85rem;color:var(--muted);font-weight:600;margin-top:3px}
+.filter-row{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;margin-bottom:20px;scrollbar-width:none}
+.filter-row::-webkit-scrollbar{display:none}
+.filter-chip{flex-shrink:0;padding:7px 16px;border-radius:999px;border:2px solid rgba(200,160,240,.3);background:rgba(255,255,255,.7);font-family:'Nunito',sans-serif;font-size:.78rem;font-weight:800;color:var(--muted);cursor:pointer;transition:all .2s;white-space:nowrap}
+.filter-chip.active{background:linear-gradient(135deg,#c084fc,#f472b6);color:white;border-color:transparent;box-shadow:0 4px 12px rgba(192,132,252,.3)}
+.class-card{background:var(--card-bg);border-radius:22px;padding:18px;border:2px solid rgba(255,255,255,.6);box-shadow:0 6px 20px rgba(0,0,0,.07);cursor:pointer;transition:all .25s cubic-bezier(.34,1.56,.64,1);margin-bottom:12px;display:flex;gap:14px;align-items:center}
+.class-card:hover{transform:translateY(-3px);box-shadow:0 10px 28px rgba(0,0,0,.1)}
+.class-thumb{width:70px;height:70px;border-radius:18px;display:flex;align-items:center;justify-content:center;font-size:2.2rem;flex-shrink:0}
+.class-info{flex:1}
+.class-name{font-family:'Baloo 2',cursive;font-size:1rem;font-weight:800;color:var(--soft-dark);margin-bottom:3px}
+.class-meta{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:5px}
+.class-tag{font-size:.66rem;font-weight:800;padding:2px 9px;border-radius:999px}
+.tag-yoga{background:#fde8f0;color:#e06090}
+.tag-meditate{background:#e8e0ff;color:#8060d0}
+.tag-breathe{background:#d8f0ff;color:#4090c0}
+.class-detail{font-size:.74rem;font-weight:600;color:var(--muted)}
+.class-play{width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,#c084fc,#f472b6);display:flex;align-items:center;justify-content:center;color:white;font-size:.9rem;flex-shrink:0;box-shadow:0 4px 12px rgba(192,132,252,.35)}
+.featured-class{background:linear-gradient(135deg,#c084fc,#f472b6);border-radius:24px;padding:22px;margin-bottom:12px;color:white;position:relative;overflow:hidden;cursor:pointer}
+.featured-class::after{content:'✨';position:absolute;right:20px;top:50%;transform:translateY(-50%);font-size:3rem;opacity:.25}
+.featured-badge{display:inline-block;background:rgba(255,255,255,.25);border-radius:999px;padding:3px 12px;font-size:.68rem;font-weight:800;margin-bottom:8px}
+.featured-title{font-family:'Baloo 2',cursive;font-size:1.3rem;font-weight:800;margin-bottom:4px}
+.featured-sub{font-size:.8rem;opacity:.85;font-weight:600}
+.featured-row{display:flex;align-items:center;gap:10px;margin-top:14px}
+.featured-btn{background:white;color:#c084fc;border:none;border-radius:999px;padding:8px 20px;font-family:'Baloo 2',cursive;font-size:.85rem;font-weight:800;cursor:pointer}
+.featured-time{font-size:.78rem;opacity:.8;font-weight:700}
+
+/* PROGRESS */
+.progress-hero{background:linear-gradient(135deg,#c084fc,#f472b6,#fb923c);border-radius:24px;padding:22px;color:white;text-align:center;margin-bottom:20px;position:relative;overflow:hidden}
+.progress-hero::before{content:'🌟';position:absolute;right:20px;top:20px;font-size:2.5rem;opacity:.2}
+.progress-hero h2{font-family:'Baloo 2',cursive;font-size:1.5rem;font-weight:800}
+.progress-hero p{font-size:.82rem;opacity:.85;font-weight:600;margin-top:4px}
+.xp-bar-wrap{background:rgba(255,255,255,.25);border-radius:999px;height:10px;margin:14px 0 6px;overflow:hidden}
+.xp-bar{height:100%;background:white;border-radius:999px;width:0;transition:width 1.2s cubic-bezier(.34,1.56,.64,1)}
+.xp-label{font-size:.75rem;opacity:.85;font-weight:700}
+.badges-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.badge-item{background:var(--card-bg);border-radius:18px;padding:14px 10px;text-align:center;border:2px solid rgba(255,255,255,.6);box-shadow:0 4px 12px rgba(0,0,0,.06);cursor:pointer;transition:all .2s}
+.badge-item:hover{transform:translateY(-3px) scale(1.05)}
+.badge-item.locked{opacity:.4;filter:grayscale(.6)}
+.badge-emoji{font-size:2rem;display:block;margin-bottom:6px}
+.badge-name{font-family:'Baloo 2',cursive;font-size:.75rem;font-weight:800;color:var(--soft-dark)}
+.badge-desc{font-size:.62rem;font-weight:600;color:var(--muted);margin-top:2px}
+.week-chart{background:var(--card-bg);border-radius:22px;padding:18px;border:2px solid rgba(255,255,255,.6);box-shadow:0 6px 20px rgba(0,0,0,.07)}
+.week-chart-title{font-family:'Baloo 2',cursive;font-size:.95rem;font-weight:800;color:var(--soft-dark);margin-bottom:16px}
+.chart-bars{display:flex;align-items:flex-end;gap:8px;height:80px}
+.chart-bar-wrap{flex:1;display:flex;flex-direction:column;align-items:center;gap:5px;height:100%;justify-content:flex-end}
+.chart-bar{width:100%;border-radius:8px 8px 4px 4px}
+.chart-day{font-size:.65rem;font-weight:800;color:var(--muted)}
+
+/* PROFILE */
+.profile-top{text-align:center;padding:28px 0 20px}
+.profile-avatar-wrap{width:88px;height:88px;border-radius:28px;background:linear-gradient(135deg,#c084fc,#f472b6);display:flex;align-items:center;justify-content:center;font-size:3rem;margin:0 auto 12px;box-shadow:0 8px 24px rgba(192,132,252,.35);overflow:hidden}
+.profile-avatar-wrap img{width:100%;height:100%;object-fit:cover;display:none;border-radius:28px}
+.profile-name{font-family:'Baloo 2',cursive;font-size:1.5rem;font-weight:800;color:var(--soft-dark)}
+.profile-handle{font-size:.82rem;color:var(--muted);font-weight:700;margin-top:2px}
+.profile-tags{display:flex;gap:8px;justify-content:center;margin-top:12px;flex-wrap:wrap}
+.profile-tag{padding:4px 14px;border-radius:999px;font-size:.72rem;font-weight:800}
+.ptag-1{background:#fde8f0;color:#e06090}.ptag-2{background:#e8e0ff;color:#8060d0}.ptag-3{background:#d8fff0;color:#40a080}
+.signout-btn{display:flex;align-items:center;gap:10px;width:100%;background:var(--card-bg);border-radius:16px;padding:14px 16px;border:2px solid rgba(255,100,100,.15);box-shadow:0 3px 10px rgba(0,0,0,.05);cursor:pointer;transition:all .2s;font-family:'Nunito',sans-serif;font-weight:800;font-size:.88rem;color:#e06060;margin-top:8px}
+.signout-btn:hover{background:rgba(255,200,200,.2);transform:translateX(4px)}
+.settings-list{display:flex;flex-direction:column;gap:8px}
+.settings-item{background:var(--card-bg);border-radius:16px;padding:14px 16px;display:flex;align-items:center;gap:12px;border:2px solid rgba(255,255,255,.6);box-shadow:0 3px 10px rgba(0,0,0,.05);cursor:pointer;transition:all .2s}
+.settings-item:hover{transform:translateX(4px)}
+.settings-icon-wrap{width:38px;height:38px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:1.3rem;flex-shrink:0}
+.settings-item-title{font-weight:800;font-size:.88rem;color:var(--soft-dark)}
+.settings-item-sub{font-size:.7rem;color:var(--muted);font-weight:600;margin-top:1px}
+.settings-arrow{margin-left:auto;font-size:.9rem;color:#d4c0f0}
+
+/* SHEET */
+.sheet-overlay{position:fixed;inset:0;z-index:300;display:none;background:rgba(60,40,80,.4);backdrop-filter:blur(6px);align-items:flex-end;justify-content:center}
+.sheet-overlay.open{display:flex}
+.sheet{width:100%;max-width:480px;background:white;border-radius:28px 28px 0 0;padding:22px 20px 36px;position:relative;animation:slideUp .35s cubic-bezier(.34,1.56,.64,1)}
+@keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+.sheet-handle{width:38px;height:4px;background:#e0d4f0;border-radius:99px;margin:0 auto 18px}
+.sheet-title{font-family:'Baloo 2',cursive;font-size:1.3rem;font-weight:800;color:var(--soft-dark);margin-bottom:4px}
+.sheet-sub{font-size:.82rem;color:var(--muted);font-weight:600;margin-bottom:18px}
+.sheet-close{position:absolute;top:18px;right:18px;background:#f0e8ff;border:none;border-radius:50%;width:30px;height:30px;cursor:pointer;color:#9b72d0;font-weight:900;display:flex;align-items:center;justify-content:center}
+.pose-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.pose-card{border-radius:18px;padding:16px 12px;text-align:center;cursor:pointer;transition:all .2s cubic-bezier(.34,1.56,.64,1);border:2px solid transparent}
+.pose-card:hover{transform:scale(1.05);border-color:#c084fc}
+.pose-card:nth-child(1){background:#fde8f0}.pose-card:nth-child(2){background:#e8f4ff}.pose-card:nth-child(3){background:#e8fff4}.pose-card:nth-child(4){background:#fff8e8}
+.pose-emoji{font-size:2.2rem;display:block;margin-bottom:6px}
+.pose-name{font-family:'Baloo 2',cursive;font-weight:800;font-size:.88rem;color:var(--soft-dark)}
+.pose-time{font-size:.7rem;font-weight:600;color:var(--muted)}
+
+/* COMPLETE */
+.complete-screen{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;padding:40px;z-index:10;background:inherit}
+.complete-btn{background:rgba(255,255,255,.2);border:2px solid rgba(255,255,255,.4);color:white;border-radius:999px;padding:12px 32px;font-family:'Baloo 2',cursive;font-size:1rem;font-weight:800;cursor:pointer;transition:all .2s}
+.complete-btn:hover{background:rgba(255,255,255,.3)}
+
+/* SAVING INDICATOR */
+.save-indicator{position:fixed;top:16px;left:50%;transform:translateX(-50%);background:rgba(163,232,204,.9);color:#1a5a3a;border-radius:999px;padding:6px 16px;font-size:.75rem;font-weight:800;z-index:999;opacity:0;transition:opacity .3s;pointer-events:none;font-family:'Nunito',sans-serif}
+.save-indicator.show{opacity:1}
+</style>
+</head>
+<body>
+
+<div class="bg-blobs"><div class="blob blob-1"></div><div class="blob blob-2"></div><div class="blob blob-3"></div><div class="blob blob-4"></div></div>
+<div class="sparkles" id="sparkles"></div>
+<div class="save-indicator" id="saveIndicator">☁️ Saved!</div>
+
+<!-- ═══════ LOGIN SCREEN ═══════ -->
+<div id="loginScreen">
+  <div class="login-logo">🐼</div>
+  <div class="login-title">Immy's Wellbeing Studio</div>
+  <div class="login-sub">Playful yoga · meditation · mindfulness<br>Your progress syncs across all your devices ✨</div>
+  <button class="google-btn" onclick="window.fbSignIn()">
+    <svg class="google-icon" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+    Continue with Google
+  </button>
+  <div class="login-footer">By signing in you agree to keep your vibes positive 🌸<br>Your data is stored securely in Firebase</div>
+</div>
+
+<!-- ═══════ MAIN APP ═══════ -->
+<div id="mainApp">
+
+<!-- HOME -->
+<div class="page active" id="page-home">
+  <div class="home-header">
+    <div class="logo-badge"><span class="logo-emoji">🐼</span><span class="logo-text">Immy's Wellbeing Studio</span></div>
+    <h1>Hey bestie! ✨</h1>
+    <p id="homeGreeting">Let's make today magical 🌸</p>
+  </div>
+  <div class="welcome-banner">
+    <div class="welcome-avatar-wrap"><img id="profileAvatarImg" alt=""><span id="profileAvatarEmoji">🌸</span></div>
+    <div class="welcome-text">
+      <h2>Welcome back, <span id="welcomeName">Bestie</span></h2>
+      <p><span id="statSessions">0</span> sessions total 💜</p>
+      <span class="welcome-tag" id="welcomeTag">✨ Level 1 Beginner Petal</span>
+    </div>
+  </div>
+  <div class="stats-row">
+    <div class="stat-card"><div class="stat-icon">🧘</div><div class="stat-num" id="statSessions2">0</div><div class="stat-lbl">Sessions</div></div>
+    <div class="stat-card"><div class="stat-icon">💜</div><div class="stat-num" id="statXP">0</div><div class="stat-lbl">XP Points</div></div>
+    <div class="stat-card"><div class="stat-icon">📔</div><div class="stat-num" id="journalCount">0</div><div class="stat-lbl">Journals</div></div>
+  </div>
+  <div class="section">
+    <div class="streak-card"><span class="streak-flame">🔥</span><div class="streak-info"><div class="streak-num" id="streakNum">0</div><div class="streak-label">Day streak — keep going!</div></div><div class="streak-days"><div class="streak-day">M</div><div class="streak-day">T</div><div class="streak-day">W</div><div class="streak-day">T</div><div class="streak-day">F</div><div class="streak-day">S</div><div class="streak-day">S</div></div></div>
+  </div>
+  <div class="section">
+    <div class="section-label">✨ How are you feeling rn?</div>
+    <div class="mood-card">
+      <div class="mood-question">Check in with yourself 💭</div>
+      <div class="mood-row">
+        <button class="mood-btn" onclick="selectMood(this,'amazing')"><span class="mood-icon">🌟</span><span class="mood-label">Amazing</span></button>
+        <button class="mood-btn" onclick="selectMood(this,'happy')"><span class="mood-icon">😊</span><span class="mood-label">Happy</span></button>
+        <button class="mood-btn" onclick="selectMood(this,'okay')"><span class="mood-icon">😌</span><span class="mood-label">Okay</span></button>
+        <button class="mood-btn" onclick="selectMood(this,'meh')"><span class="mood-icon">😶</span><span class="mood-label">Meh</span></button>
+        <button class="mood-btn" onclick="selectMood(this,'sad')"><span class="mood-icon">🌧️</span><span class="mood-label">Low</span></button>
+      </div>
+      <div class="mood-response" id="moodResponse"></div>
+    </div>
+  </div>
+  <div class="section">
+    <div class="section-label">💜 Today's affirmation</div>
+    <div class="affirmation-card"><span class="affirmation-emoji" id="affEmoji">🌸</span><div class="affirmation-text" id="affText">"I am calm, kind, and capable of amazing things."</div><button class="affirmation-btn" onclick="newAffirmation()">✨ New one pls!</button></div>
+  </div>
+  <div class="section">
+    <div class="section-label">🎯 Start a session</div>
+    <div class="actions-grid">
+      <div class="action-card yoga" onclick="openYogaPicker()"><span class="action-emoji">🧘‍♀️</span><div class="action-title">Yoga Flow</div><div class="action-sub">Guided poses 🐱</div></div>
+      <div class="action-card meditate" onclick="openMeditate()"><span class="action-emoji">🔮</span><div class="action-title">Meditate</div><div class="action-sub">Guided + timed ✨</div></div>
+      <div class="action-card breathe" onclick="openBreathe()"><span class="action-emoji">🫧</span><div class="action-title">Breathwork</div><div class="action-sub">4 patterns 🌬️</div></div>
+      <div class="action-card journal" onclick="openJournal()"><span class="action-emoji">📔</span><div class="action-title">Journal</div><div class="action-sub">Write + save 🌸</div></div>
+    </div>
+  </div>
+  <div class="section">
+    <div class="section-label">🌈 Today's checklist</div>
+    <div class="activity-list">
+      <div class="activity-item" onclick="toggleActivity(this)"><div class="activity-dot" style="background:#fde8f0">🧘</div><div class="activity-info"><div class="activity-name">Morning stretch</div><div class="activity-time">5 mins • Yoga</div></div><div class="activity-check"></div></div>
+      <div class="activity-item" onclick="toggleActivity(this)"><div class="activity-dot" style="background:#e0d4f8">🧠</div><div class="activity-info"><div class="activity-name">Mindful moment</div><div class="activity-time">3 mins • Meditation</div></div><div class="activity-check"></div></div>
+      <div class="activity-item" onclick="toggleActivity(this)"><div class="activity-dot" style="background:#d4f0f8">💧</div><div class="activity-info"><div class="activity-name">Drink 6 glasses of water</div><div class="activity-time">All day • Self care</div></div><div class="activity-check"></div></div>
+      <div class="activity-item" onclick="toggleActivity(this)"><div class="activity-dot" style="background:#fef0d4">📝</div><div class="activity-info"><div class="activity-name">Gratitude journal</div><div class="activity-time">5 mins • Journaling</div></div><div class="activity-check"></div></div>
+      <div class="activity-item" onclick="toggleActivity(this)"><div class="activity-dot" style="background:#e8fff4">😴</div><div class="activity-info"><div class="activity-name">Wind-down breathing</div><div class="activity-time">8 mins • Before bed</div></div><div class="activity-check"></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- CLASSES -->
+<div class="page" id="page-classes">
+  <div class="page-header"><div class="page-title">Classes 🧘</div><div class="page-sub">Pick a session that matches your vibe ✨</div></div>
+  <div class="filter-row"><div class="filter-chip active" onclick="filterChip(this)">All</div><div class="filter-chip" onclick="filterChip(this)">Yoga</div><div class="filter-chip" onclick="filterChip(this)">Meditate</div><div class="filter-chip" onclick="filterChip(this)">Breathwork</div><div class="filter-chip" onclick="filterChip(this)">Journal</div></div>
+  <div class="featured-class" onclick="openYogaClass({name:'Kawaii Morning Flow',emoji:'🌸',xp:25,poses:[{e:'🐱',n:'Cat Pose',c:'Round your back like a scared cat 🐾',s:20},{e:'🐄',n:'Cow Pose',c:'Drop belly down, lift head and tail ☀️',s:20},{e:'🌳',n:'Mountain Pose',c:'Stand tall, roots in the ground 🌿',s:30},{e:'🧘',n:\"Child's Pose\",c:'Sink back, let everything go 💜',s:40}]})">
+    <div class="featured-badge">⭐ Featured today</div><div class="featured-title">Kawaii Morning Flow</div><div class="featured-sub">Animal-inspired poses to wake up your body 🐱🦋</div>
+    <div class="featured-row"><button class="featured-btn">Start now ▶</button><span class="featured-time">⏱️ 12 mins • Beginner</span></div>
+  </div>
+  <div class="section-label">🌸 All classes</div>
+  <div class="class-card" onclick="openYogaClass({name:'Cat & Cow Stretch',emoji:'🐱',xp:12,poses:[{e:'🐱',n:'Cat Pose',c:'Exhale, round your spine up 🌙',s:20},{e:'🐄',n:'Cow Pose',c:'Inhale, drop belly, lift chin ☀️',s:20},{e:'🧘',n:'Neutral Spine',c:'Find the middle, soft and balanced 💜',s:20}]})"><div class="class-thumb" style="background:#fde8f0">🐱</div><div class="class-info"><div class="class-name">Cat & Cow Stretch</div><div class="class-meta"><span class="class-tag tag-yoga">Yoga</span></div><div class="class-detail">⏱️ 5 mins &nbsp;•&nbsp; 🔥 12 XP</div></div><div class="class-play">▶</div></div>
+  <div class="class-card" onclick="openYogaClass({name:'Sun Salutation',emoji:'☀️',xp:25,poses:[{e:'🙏',n:'Mountain Pose',c:'Stand tall, breathe deep 🌎',s:15},{e:'🙌',n:'Raised Arms',c:'Sweep up, open your heart ☀️',s:15},{e:'🧎',n:'Forward Fold',c:'Dive down, head hang heavy 🌊',s:20},{e:'🐕',n:'Downward Dog',c:'Push floor away, heels reaching down 🌿',s:25},{e:'🧘',n:\"Child's Pose\",c:'Rest here. You earned it 💜',s:30}]})"><div class="class-thumb" style="background:#fff0d8">☀️</div><div class="class-info"><div class="class-name">Sun Salutation Flow</div><div class="class-meta"><span class="class-tag tag-yoga">Yoga</span></div><div class="class-detail">⏱️ 10 mins &nbsp;•&nbsp; 🔥 25 XP</div></div><div class="class-play">▶</div></div>
+  <div class="class-card" onclick="openMeditateWithPreset(5)"><div class="class-thumb" style="background:#e0d4f8">🔮</div><div class="class-info"><div class="class-name">Body Scan Meditation</div><div class="class-meta"><span class="class-tag tag-meditate">Meditate</span></div><div class="class-detail">⏱️ 5 mins &nbsp;•&nbsp; 🔥 20 XP</div></div><div class="class-play">▶</div></div>
+  <div class="class-card" onclick="openBreatheWithPattern('478')"><div class="class-thumb" style="background:#d4f0f8">🌊</div><div class="class-info"><div class="class-name">4-7-8 Sleep Breathwork</div><div class="class-meta"><span class="class-tag tag-breathe">Breathwork</span></div><div class="class-detail">⏱️ 7 mins &nbsp;•&nbsp; 🔥 18 XP</div></div><div class="class-play">▶</div></div>
+  <div class="class-card" onclick="openYogaClass({name:'Butterfly Flow',emoji:'🦋',xp:15,poses:[{e:'🦋',n:'Butterfly Pose',c:'Soles together, knees open wide 🌸',s:40},{e:'🌊',n:'Side Bend',c:'Lean left, breathe into the side body 💜',s:25},{e:'🧘',n:'Savasana',c:'Lie back, totally let go 💤',s:45}]})"><div class="class-thumb" style="background:#e8f4ff">🦋</div><div class="class-info"><div class="class-name">Butterfly Flow</div><div class="class-meta"><span class="class-tag tag-yoga">Yoga</span></div><div class="class-detail">⏱️ 6 mins &nbsp;•&nbsp; 🔥 15 XP</div></div><div class="class-play">▶</div></div>
+  <div class="class-card" onclick="openMeditateWithPreset(10)"><div class="class-thumb" style="background:#e8e0ff">🌙</div><div class="class-info"><div class="class-name">Sleep Meditation</div><div class="class-meta"><span class="class-tag tag-meditate">Meditate</span></div><div class="class-detail">⏱️ 10 mins &nbsp;•&nbsp; 🔥 22 XP</div></div><div class="class-play">▶</div></div>
+  <div class="class-card" onclick="openJournal()"><div class="class-thumb" style="background:#fef0d4">📔</div><div class="class-info"><div class="class-name">Gratitude Journaling</div><div class="class-meta"><span class="class-tag" style="background:#fef0d4;color:#c08030">Journal</span></div><div class="class-detail">Open-ended &nbsp;•&nbsp; 🔥 15 XP on save</div></div><div class="class-play">▶</div></div>
+</div>
+
+<!-- PROGRESS -->
+<div class="page" id="page-progress">
+  <div class="page-header"><div class="page-title">Progress 📊</div><div class="page-sub">Your journey, synced to the cloud ☁️💜</div></div>
+  <div class="progress-hero"><h2 id="progressLevelName">Beginner Petal 🌸</h2><p id="xpLevelLabel">0 / 500 XP to next level</p><div class="xp-bar-wrap"><div class="xp-bar" id="xpBar"></div></div></div>
+  <div class="section"><div class="section-label">📅 This week</div><div class="week-chart"><div class="week-chart-title">Activity</div><div class="chart-bars" id="chartBars"></div></div></div>
+  <div class="section"><div class="section-label">🏅 Badges</div>
+    <div class="badges-grid">
+      <div class="badge-item"><span class="badge-emoji">🌱</span><div class="badge-name">First Step</div><div class="badge-desc">1st session</div></div>
+      <div class="badge-item"><span class="badge-emoji">🧘</span><div class="badge-name">Yoga Newbie</div><div class="badge-desc">First pose</div></div>
+      <div class="badge-item"><span class="badge-emoji">📔</span><div class="badge-name">Journaller</div><div class="badge-desc">First entry</div></div>
+      <div class="badge-item locked"><span class="badge-emoji">🔥</span><div class="badge-name">7-Day Streak</div><div class="badge-desc">7 days in a row</div></div>
+      <div class="badge-item locked"><span class="badge-emoji">🦋</span><div class="badge-name">Transformation</div><div class="badge-desc">30-day streak</div></div>
+      <div class="badge-item locked"><span class="badge-emoji">🌟</span><div class="badge-name">Zen Master</div><div class="badge-desc">Level 10</div></div>
+    </div>
+  </div>
+  <div class="section"><div class="section-label">🌈 All-time</div>
+    <div class="stats-row" style="margin-bottom:0">
+      <div class="stat-card"><div class="stat-icon">🧘</div><div class="stat-num" id="progressSessions">0</div><div class="stat-lbl">Sessions</div></div>
+      <div class="stat-card"><div class="stat-icon">💜</div><div class="stat-num" id="progressXP">0</div><div class="stat-lbl">Total XP</div></div>
+      <div class="stat-card"><div class="stat-icon">📔</div><div class="stat-num" id="progressJournals">0</div><div class="stat-lbl">Journals</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- PROFILE -->
+<div class="page" id="page-profile">
+  <div class="profile-top">
+    <div class="profile-avatar-wrap"><img id="profileAvatarImgLarge" alt=""><span id="profileEmojiLarge">🐼</span></div>
+    <div class="profile-name" id="profileName">Bestie ✨</div>
+    <div class="profile-handle" id="profileHandle">@user</div>
+    <div class="profile-tags"><span class="profile-tag ptag-1">🧘 Yoga lover</span><span class="profile-tag ptag-2">💜 Mindful</span><span class="profile-tag ptag-3">🌿 Growing daily</span></div>
+  </div>
+  <div class="section"><div class="section-label">⚙️ Settings</div>
+    <div class="settings-list">
+      <div class="settings-item"><div class="settings-icon-wrap" style="background:#d4f0f8">☁️</div><div><div class="settings-item-title">Cloud sync</div><div class="settings-item-sub">Journal & progress saved to Firebase</div></div><div style="font-size:.7rem;color:#40a060;font-weight:800">● Live</div></div>
+      <div class="settings-item"><div class="settings-icon-wrap" style="background:#fde8f0">🔔</div><div><div class="settings-item-title">Notifications</div><div class="settings-item-sub">Daily reminders & streak alerts</div></div><div class="settings-arrow">›</div></div>
+      <div class="settings-item"><div class="settings-icon-wrap" style="background:#e0d4f8">🎨</div><div><div class="settings-item-title">Theme</div><div class="settings-item-sub">Kawaii pastel (active)</div></div><div class="settings-arrow">›</div></div>
+      <div class="settings-item"><div class="settings-icon-wrap" style="background:#d4f0f8">🎵</div><div><div class="settings-item-title">Ambient sounds</div><div class="settings-item-sub">Available in all sessions</div></div><div class="settings-arrow">›</div></div>
+    </div>
+    <button class="signout-btn" onclick="window.fbSignOut()">🚪 Sign out</button>
+  </div>
+</div>
+
+</div><!-- end mainApp -->
+
+<!-- NAV -->
+<nav class="bottom-nav" id="bottomNav" style="display:none">
+  <div class="nav-item active" onclick="switchPage('home',this)"><span class="nav-icon">🏠</span><span class="nav-label">Home</span></div>
+  <div class="nav-item" onclick="switchPage('classes',this)"><span class="nav-icon">🧘</span><span class="nav-label">Classes</span></div>
+  <div class="nav-item" onclick="switchPage('progress',this)"><span class="nav-icon">📊</span><span class="nav-label">Progress</span></div>
+  <div class="nav-item" onclick="switchPage('profile',this)"><span class="nav-icon">🐼</span><span class="nav-label">Profile</span></div>
+</nav>
+
+<!-- YOGA PICKER -->
+<div class="sheet-overlay" id="yogaSheet" onclick="closeSheet()">
+  <div class="sheet" onclick="event.stopPropagation()">
+    <button class="sheet-close" onclick="closeSheet()">✕</button>
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">Choose a Yoga Flow 🌸</div>
+    <div class="sheet-sub">Pick your vibe for today ✨</div>
+    <div class="pose-grid">
+      <div class="pose-card" onclick="openYogaClass({name:'Cat & Cow',emoji:'🐱',xp:12,poses:[{e:'🐱',n:'Cat Pose',c:'Exhale, round your spine up 🌙',s:20},{e:'🐄',n:'Cow Pose',c:'Inhale, drop belly, lift chin ☀️',s:20},{e:'🧘',n:'Neutral',c:'Find the middle, balanced 💜',s:20}]});closeSheet()"><span class="pose-emoji">🐱</span><div class="pose-name">Cat & Cow</div><div class="pose-time">5 mins</div></div>
+      <div class="pose-card" onclick="openYogaClass({name:'Sun Salute',emoji:'☀️',xp:25,poses:[{e:'🙏',n:'Mountain',c:'Stand tall, breathe deep 🌎',s:15},{e:'🙌',n:'Raised Arms',c:'Sweep up, open your heart ☀️',s:15},{e:'🧎',n:'Forward Fold',c:'Dive down, head hang heavy 🌊',s:20},{e:'🐕',n:'Down Dog',c:'Push floor away, heels down 🌿',s:25}]});closeSheet()"><span class="pose-emoji">☀️</span><div class="pose-name">Sun Salute</div><div class="pose-time">10 mins</div></div>
+      <div class="pose-card" onclick="openYogaClass({name:'Tree Pose',emoji:'🌳',xp:15,poses:[{e:'🌳',n:'Tree — left',c:'Root left foot, open hip, grow tall 🌿',s:30},{e:'🌳',n:'Tree — right',c:'Switch sides, find balance 💜',s:30},{e:'🧘',n:'Mountain',c:'Come back to centre 🌎',s:20}]});closeSheet()"><span class="pose-emoji">🌳</span><div class="pose-name">Tree Pose</div><div class="pose-time">4 mins</div></div>
+      <div class="pose-card" onclick="openYogaClass({name:'Butterfly',emoji:'🦋',xp:15,poses:[{e:'🦋',n:'Butterfly',c:'Soles together, knees open like wings 🌸',s:40},{e:'🌊',n:'Side Bend',c:'Lean left, breathe into side body 💜',s:25},{e:'🧘',n:'Savasana',c:'Lie back, totally let go 💤',s:45}]});closeSheet()"><span class="pose-emoji">🦋</span><div class="pose-name">Butterfly</div><div class="pose-time">6 mins</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- BREATHWORK -->
+<div class="exp-overlay" id="breathExp">
+  <button class="exp-close" onclick="closeBreathe()">✕</button>
+  <div class="breath-scene">
+    <div class="breath-pattern-row">
+      <button class="breath-pat-btn active" onclick="setPattern('box',this)">Box 4-4-4-4</button>
+      <button class="breath-pat-btn" onclick="setPattern('478',this)">4-7-8 Sleep</button>
+      <button class="breath-pat-btn" onclick="setPattern('calm',this)">Calm 4-6</button>
+      <button class="breath-pat-btn" onclick="setPattern('energy',this)">Energise 6-2</button>
+    </div>
+    <div class="breath-rings"><div class="breath-ring"></div><div class="breath-ring"></div><div class="breath-ring"></div><div class="breath-core" id="breathCore">🌸</div></div>
+    <div class="breath-phase-label" id="breathPhaseLabel">Ready to begin</div>
+    <div class="breath-counter" id="breathCounter">—</div>
+    <div class="breath-sub" id="breathSub">Choose a pattern above</div>
+    <div class="round-track" id="roundTrack"></div>
+    <div style="height:16px"></div>
+    <div class="breath-controls">
+      <button class="sound-btn" id="breathSoundBtn" onclick="toggleBreathSound()">🔇</button>
+      <button class="breath-main-btn" id="breathMainBtn" onclick="toggleBreathe()">Start ✨</button>
+      <button class="sound-btn" onclick="cycleBreathVibe()">🔄</button>
+    </div>
+    <div style="font-size:.7rem;color:rgba(255,255,255,.4);margin-top:12px;text-align:center">Tap 🔇 for ambient rain sound</div>
+  </div>
+  <div class="complete-screen" id="breathComplete" style="background:linear-gradient(160deg,#1a0a2e,#2d1b4e)">
+    <div style="font-size:5rem;margin-bottom:20px;animation:bounce 1s ease-in-out infinite">🌬️</div>
+    <div style="font-family:'Baloo 2',cursive;font-size:1.8rem;font-weight:800;color:white;margin-bottom:8px">Beautiful! 💜</div>
+    <div style="font-size:.88rem;color:rgba(255,255,255,.7);font-weight:600;margin-bottom:28px;text-align:center">Breathwork complete.<br>Feel that calm? ✨</div>
+    <button class="complete-btn" onclick="resetBreathe()">Another round 🌸</button>
+  </div>
+</div>
+
+<!-- YOGA -->
+<div class="exp-overlay" id="yogaExp">
+  <button class="exp-close" onclick="closeYoga()">✕</button>
+  <div class="yoga-header"><div class="yoga-class-name" id="yogaClassName">Yoga Flow</div><div class="yoga-progress-bar"><div class="yoga-progress-fill" id="yogaProgressFill" style="width:0%"></div></div></div>
+  <div class="yoga-main">
+    <div class="yoga-pose-art" id="yogaPoseArt">🧘</div>
+    <div class="yoga-pose-name" id="yogaPoseName">Getting ready...</div>
+    <div class="yoga-pose-cue" id="yogaPoseCue">Settle in and find your breath 🌸</div>
+    <div class="yoga-timer-ring"><svg class="yoga-timer-svg" viewBox="0 0 90 90"><circle class="yoga-timer-bg" cx="45" cy="45" r="38"/><circle class="yoga-timer-arc" id="yogaTimerArc" cx="45" cy="45" r="38" stroke-dasharray="239" stroke-dashoffset="0"/></svg><div class="yoga-timer-num" id="yogaTimerNum">—</div></div>
+    <div class="yoga-step-info" id="yogaStepInfo">Pose 0 of 0</div>
+    <div class="yoga-btn-row"><button class="yoga-action-btn" onclick="skipPose()">Skip ›</button><button class="yoga-action-btn primary" id="yogaMainBtn" onclick="toggleYoga()">Start 🌿</button></div>
+    <div class="yoga-sound-row"><div class="yoga-sound-chip" id="yogaSoundNature" onclick="toggleYogaSound('nature')">🌿 Forest</div><div class="yoga-sound-chip" id="yogaSoundRain" onclick="toggleYogaSound('rain')">🌧️ Rain</div><div class="yoga-sound-chip" id="yogaSoundBowl" onclick="toggleYogaSound('bowl')">🎵 Bowls</div></div>
+  </div>
+  <div class="complete-screen" id="yogaComplete" style="background:linear-gradient(160deg,#1a2a1a,#2a3a20)">
+    <div style="font-size:5rem;margin-bottom:20px;animation:bounce 1s ease-in-out infinite">🧘</div>
+    <div style="font-family:'Baloo 2',cursive;font-size:1.8rem;font-weight:800;color:white;margin-bottom:8px">Namaste! 🙏</div>
+    <div style="font-size:.88rem;color:rgba(255,255,255,.7);font-weight:600;margin-bottom:8px;text-align:center" id="yogaCompleteMsg">Flow complete!</div>
+    <div style="font-size:.8rem;color:rgba(255,255,255,.5);margin-bottom:28px" id="yogaXPMsg">+25 XP earned ✨</div>
+    <button class="complete-btn" onclick="closeYoga()">Back to studio 🌿</button>
+  </div>
+</div>
+
+<!-- MEDITATION -->
+<div class="exp-overlay" id="meditateExp">
+  <button class="exp-close" onclick="closeMeditate()">✕</button>
+  <div class="med-scene">
+    <div class="med-particles" id="medParticles"></div>
+    <div class="med-orb"><div class="med-orb-ring"></div><div class="med-orb-ring2"></div><span>🌟</span></div>
+    <div class="med-title">Guided Meditation</div>
+    <div class="med-guide" id="medGuide">Find a comfortable position. Close your eyes when you're ready. 🌙</div>
+    <div class="med-duration-row">
+      <button class="med-dur-btn active" onclick="setMedDuration(3,this)">3 min</button>
+      <button class="med-dur-btn" onclick="setMedDuration(5,this)">5 min</button>
+      <button class="med-dur-btn" onclick="setMedDuration(10,this)">10 min</button>
+      <button class="med-dur-btn" onclick="setMedDuration(15,this)">15 min</button>
+    </div>
+    <div class="med-time-display" id="medTimeDisplay">3:00</div>
+    <div class="med-time-label" id="medTimeLabel">Choose duration & begin</div>
+    <div class="med-sound-grid">
+      <div class="med-sound-card" id="medSoundRain" onclick="toggleMedSound('rain')">🌧️ Rain</div>
+      <div class="med-sound-card" id="medSoundForest" onclick="toggleMedSound('forest')">🌿 Forest</div>
+      <div class="med-sound-card" id="medSoundOcean" onclick="toggleMedSound('ocean')">🌊 Ocean</div>
+      <div class="med-sound-card" id="medSoundBowl" onclick="toggleMedSound('bowl')">🔔 Bowls</div>
+    </div>
+    <button class="med-main-btn" id="medMainBtn" onclick="toggleMeditate()">Begin ✨</button>
+  </div>
+  <div class="complete-screen" id="meditateComplete" style="background:linear-gradient(160deg,#0f1a2e,#1a1040)">
+    <div style="font-size:5rem;margin-bottom:20px;animation:bounce 1s ease-in-out infinite">🔮</div>
+    <div style="font-family:'Baloo 2',cursive;font-size:1.8rem;font-weight:800;color:white;margin-bottom:8px">So peaceful 💜</div>
+    <div style="font-size:.88rem;color:rgba(255,255,255,.7);font-weight:600;margin-bottom:28px;text-align:center">Your mind is clearer now ✨</div>
+    <button class="complete-btn" onclick="resetMeditate()">Meditate again 🌙</button>
+  </div>
+</div>
+
+<!-- JOURNAL -->
+<div class="exp-overlay" id="journalExp">
+  <button class="exp-close" onclick="closeJournal()">✕</button>
+  <div class="journal-header">
+    <div class="journal-title-area"><div class="journal-date-label" id="journalDateLabel"></div><div class="journal-entry-title">Today's Journal 📔</div></div>
+    <button class="sound-btn" id="journalSoundBtn" onclick="toggleJournalSound()" style="background:rgba(255,200,120,.1);border-color:rgba(255,200,120,.2);color:rgba(255,200,120,.7)">🎵</button>
+  </div>
+  <div class="journal-prompts">
+    <div class="prompt-chip" onclick="usePrompt('What am I grateful for today?')">🌸 Gratitude</div>
+    <div class="prompt-chip" onclick="usePrompt('What made me smile today?')">😊 Joy</div>
+    <div class="prompt-chip" onclick="usePrompt('How am I feeling right now and why?')">💭 Feelings</div>
+    <div class="prompt-chip" onclick="usePrompt('What do I want to let go of?')">🌬️ Release</div>
+    <div class="prompt-chip" onclick="usePrompt('What am I proud of myself for?')">⭐ Pride</div>
+    <div class="prompt-chip" onclick="usePrompt('What do I need more of in my life?')">🌱 Growth</div>
+  </div>
+  <div class="journal-paper">
+    <div class="paper-lines" id="paperLines"></div>
+    <div class="journal-mode-tabs"><div class="j-tab active" id="tabWrite" onclick="switchJournalTab('write')">✏️ Write</div><div class="j-tab" id="tabPast" onclick="switchJournalTab('past')">☁️ Saved entries</div></div>
+    <textarea class="journal-textarea" id="journalText" placeholder="Start writing... let it all out 🌸" oninput="updateWordCount()"></textarea>
+    <div class="journal-past" id="journalPastEntries"></div>
+    <div class="journal-toolbar">
+      <button class="j-tool-btn" onclick="insertText('💜 ')">💜</button>
+      <button class="j-tool-btn" onclick="insertText('🌸 ')">🌸</button>
+      <button class="j-tool-btn" onclick="insertText('✨ ')">✨</button>
+      <button class="j-tool-btn" onclick="insertText('\n• ')">•</button>
+      <button class="j-tool-btn" onclick="clearJournal()">🗑️</button>
+      <span class="j-word-count" id="wordCount">0 words</span>
+      <button class="j-save-btn" onclick="saveJournalEntry()">Save to cloud ☁️</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// Sparkles
+const sparkleEmojis=['⭐','✨','💫','🌟','🌸','💜','🦋','🌈'];
+const sc=document.getElementById('sparkles');
+for(let i=0;i<18;i++){const s=document.createElement('div');s.className='sparkle';s.textContent=sparkleEmojis[Math.floor(Math.random()*sparkleEmojis.length)];s.style.left=Math.random()*100+'%';s.style.top=Math.random()*100+'%';s.style.animationDelay=(Math.random()*4)+'s';s.style.animationDuration=(2+Math.random()*4)+'s';sc.appendChild(s);}
+
+// Show nav once logged in
+document.addEventListener('DOMContentLoaded',()=>{
+  const obs=new MutationObserver(()=>{if(document.getElementById('mainApp').style.display==='block')document.getElementById('bottomNav').style.display='flex';});
+  obs.observe(document.getElementById('mainApp'),{attributes:true,attributeFilter:['style']});
+});
+
+// ── NAV ──────────────────────────────────────────────
+function switchPage(id,navEl){
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  document.getElementById('page-'+id).classList.add('active');
+  navEl.classList.add('active');
+  window.scrollTo({top:0,behavior:'smooth'});
+  if(id==='progress'){setTimeout(buildChart,200);setTimeout(()=>{document.getElementById('xpBar').style.width=(((window.userProgress?.xp||0)%500)/500*100)+'%';},300);
+    const p=window.userProgress||{};document.getElementById('progressSessions').textContent=p.sessions||0;document.getElementById('progressXP').textContent=p.xp||0;document.getElementById('progressJournals').textContent=window.journalEntries?.length||0;}
+  // sync stat display
+  if(id==='home'&&window.userProgress){document.getElementById('statSessions2').textContent=window.userProgress.sessions||0;}
+}
+
+// ── SHOW SAVE INDICATOR ───────────────────────────────
+function flashSaved(){const el=document.getElementById('saveIndicator');el.classList.add('show');setTimeout(()=>el.classList.remove('show'),2000);}
+
+// ── HOME ─────────────────────────────────────────────
+const h=new Date().getHours();
+document.getElementById('homeGreeting').textContent=h<12?'Good morning — let\'s start fresh! ☀️':h<17?'Good afternoon — take a mindful moment 🌿':'Good evening — wind down beautifully 🌙';
+
+const moodMessages={amazing:{text:"You're literally glowing rn! 🌟 Let's keep that energy — try a yoga flow!"},happy:{text:"Love that for you! 😊 Maybe journal this feeling so you can look back on it?"},okay:{text:"Okay is totally valid! 💜 A little breathwork might bring some sparkle ✨"},meh:{text:"Sending you the biggest hug 🤗 Try 3 slow breaths — you've totally got this!"},sad:{text:"It's okay to not be okay 🌧️ Be gentle with yourself. Start with just 1 deep breath 💙"}};
+function selectMood(btn,mood){document.querySelectorAll('.mood-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');const res=document.getElementById('moodResponse');res.textContent=moodMessages[mood].text;res.classList.add('visible');}
+
+const affirmations=[{text:'"I am calm, kind, and capable of amazing things."',emoji:'🌸'},{text:'"My feelings are valid and I am worthy of love."',emoji:'💜'},{text:'"I choose peace and joy today."',emoji:'☀️'},{text:'"I am brave enough to take it one step at a time."',emoji:'🦋'},{text:'"I am exactly where I need to be right now."',emoji:'🌿'},{text:'"My mind is a safe and beautiful place."',emoji:'🌙'},{text:'"I radiate kindness to myself and others."',emoji:'✨'},{text:'"I am growing and that is something to celebrate."',emoji:'🌱'}];
+let affIdx=0;
+function newAffirmation(){affIdx=(affIdx+1)%affirmations.length;const a=affirmations[affIdx];const el=document.getElementById('affText'),em=document.getElementById('affEmoji');el.style.opacity=0;em.style.opacity=0;setTimeout(()=>{el.textContent=a.text;em.textContent=a.emoji;el.style.transition=em.style.transition='opacity .4s';el.style.opacity=1;em.style.opacity=1;},180);}
+
+function markActivityDone(item,save=true){item.classList.add('done');const c=item.querySelector('.activity-check');c.style.background='#a3e8cc';c.style.borderColor='#5dcba0';c.textContent='✓';c.style.color='white';c.style.fontWeight='900';c.style.fontSize='.88rem';if(save&&window.fbSaveChecklist)window.fbSaveChecklist();}
+
+function toggleActivity(item){
+  if(item.classList.contains('done')){item.classList.remove('done');const c=item.querySelector('.activity-check');c.style.background='';c.style.borderColor='#d4c0f0';c.textContent='';}
+  else markActivityDone(item,true);
+}
+
+function filterChip(el){document.querySelectorAll('.filter-chip').forEach(c=>c.classList.remove('active'));el.classList.add('active');}
+
+// ── WEB AUDIO ────────────────────────────────────────
+let audioCtx=null;
+function getAudioCtx(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();return audioCtx;}
+function makeNoise(){const ctx=getAudioCtx();const buf=ctx.createBuffer(2,ctx.sampleRate*2,ctx.sampleRate);for(let c=0;c<2;c++){const d=buf.getChannelData(c);for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1;}const src=ctx.createBufferSource();src.buffer=buf;src.loop=true;const gain=ctx.createGain();gain.gain.value=0;src.connect(gain);gain.connect(ctx.destination);src.start();return{src,gain};}
+function makeRainSound(){const ctx=getAudioCtx();const n=makeNoise();const f=ctx.createBiquadFilter();f.type='bandpass';f.frequency.value=3000;f.Q.value=0.5;n.src.disconnect();n.src.connect(f);f.connect(n.gain);n.gain.connect(ctx.destination);return n;}
+function makeOceanSound(){const ctx=getAudioCtx();const n=makeNoise();const f=ctx.createBiquadFilter();f.type='lowpass';f.frequency.value=600;const lfo=ctx.createOscillator();const lg=ctx.createGain();lfo.frequency.value=0.15;lg.gain.value=150;lfo.connect(lg);lg.connect(f.frequency);n.src.disconnect();n.src.connect(f);f.connect(n.gain);n.gain.connect(ctx.destination);lfo.start();return n;}
+function makeForestSound(){const ctx=getAudioCtx();const n=makeNoise();const f=ctx.createBiquadFilter();f.type='bandpass';f.frequency.value=1200;f.Q.value=1.5;n.src.disconnect();n.src.connect(f);f.connect(n.gain);n.gain.connect(ctx.destination);return n;}
+function makeSingingBowl(){const ctx=getAudioCtx();const master=ctx.createGain();master.gain.value=0;master.connect(ctx.destination);function ring(){const t=ctx.currentTime;const osc=ctx.createOscillator();const g=ctx.createGain();osc.frequency.setValueAtTime(432,t);osc.frequency.exponentialRampToValueAtTime(396,t+4);g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(.15,t+.1);g.gain.exponentialRampToValueAtTime(.001,t+5);osc.connect(g);g.connect(master);osc.start(t);osc.stop(t+5);}const interval=setInterval(ring,6000);ring();return{master,interval,gain:master};}
+function fadeIn(g,v,d){const ctx=getAudioCtx();g.gain.cancelScheduledValues(ctx.currentTime);g.gain.setValueAtTime(g.gain.value,ctx.currentTime);g.gain.linearRampToValueAtTime(v,ctx.currentTime+d);}
+function fadeOut(g,d){const ctx=getAudioCtx();g.gain.cancelScheduledValues(ctx.currentTime);g.gain.setValueAtTime(g.gain.value,ctx.currentTime);g.gain.linearRampToValueAtTime(0,ctx.currentTime+d);}
+function playBowlDing(){try{const ctx=getAudioCtx();const t=ctx.currentTime;const osc=ctx.createOscillator();const g=ctx.createGain();osc.frequency.value=528;g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(.2,t+.05);g.gain.exponentialRampToValueAtTime(.001,t+2);osc.connect(g);g.connect(ctx.destination);osc.start(t);osc.stop(t+2);}catch(e){}}
+
+// ── BREATHWORK ───────────────────────────────────────
+const breathPatterns={box:{phases:[{l:'Breathe In 🌬️',d:4,scale:1.35},{l:'Hold 💜',d:4,scale:1.35},{l:'Breathe Out 😮‍💨',d:4,scale:1},{l:'Hold 🌸',d:4,scale:1}],totalRounds:5},478:{phases:[{l:'Breathe In 🌬️',d:4,scale:1.35},{l:'Hold 💜',d:7,scale:1.35},{l:'Breathe Out 😮‍💨',d:8,scale:1}],totalRounds:4},calm:{phases:[{l:'Breathe In 🌬️',d:4,scale:1.35},{l:'Breathe Out 😮‍💨',d:6,scale:1}],totalRounds:8},energy:{phases:[{l:'Breathe In 💨',d:2,scale:1.35},{l:'Breathe Out 🔥',d:2,scale:1}],totalRounds:12}};
+let breathRunning=false,breathTimeout=null,breathPhase=0,breathRound=0,breathCountInterval=null,currentPattern='box',breathSoundOn=false,breathSound=null,breathVibes=['🌸','🌙','🌿','✨','🫧'],breathVibeIdx=0;
+
+function openBreathe(){document.getElementById('breathExp').classList.add('open');buildRoundTrack();}
+function openBreatheWithPattern(p){currentPattern=p;openBreathe();document.querySelectorAll('.breath-pat-btn').forEach((b,i)=>{b.classList.toggle('active',['box','478','calm','energy'][i]===p);});}
+function closeBreathe(){stopBreathe();stopBreathSound();document.getElementById('breathExp').classList.remove('open');}
+function resetBreathe(){document.getElementById('breathComplete').style.display='none';breathPhase=0;breathRound=0;buildRoundTrack();}
+function setPattern(p,el){currentPattern=p;document.querySelectorAll('.breath-pat-btn').forEach(b=>b.classList.remove('active'));el.classList.add('active');buildRoundTrack();if(breathRunning){stopBreathe();toggleBreathe();}}
+function buildRoundTrack(){const pat=breathPatterns[currentPattern];const track=document.getElementById('roundTrack');track.innerHTML='';for(let i=0;i<pat.totalRounds;i++){const d=document.createElement('div');d.className='round-dot';track.appendChild(d);}updateRoundTrack();}
+function updateRoundTrack(){document.querySelectorAll('#roundTrack .round-dot').forEach((d,i)=>{d.className='round-dot'+(i<breathRound?' done':i===breathRound?' current':'');});}
+function toggleBreathe(){if(breathRunning){stopBreathe();document.getElementById('breathMainBtn').textContent='Start ✨';document.getElementById('breathPhaseLabel').textContent='Paused';return;}breathRunning=true;document.getElementById('breathMainBtn').textContent='Pause ⏸';runBreathPhase();}
+function stopBreathe(){breathRunning=false;clearTimeout(breathTimeout);clearInterval(breathCountInterval);}
+function runBreathPhase(){if(!breathRunning)return;const pat=breathPatterns[currentPattern];if(breathRound>=pat.totalRounds){completeBreath();return;}const phase=pat.phases[breathPhase%pat.phases.length];document.getElementById('breathCore').style.transform=`scale(${phase.scale})`;document.getElementById('breathPhaseLabel').textContent=phase.l;let cd=phase.d;document.getElementById('breathCounter').textContent=cd;clearInterval(breathCountInterval);breathCountInterval=setInterval(()=>{cd--;document.getElementById('breathCounter').textContent=Math.max(0,cd);},1000);breathPhase++;if(breathPhase%pat.phases.length===0){breathRound++;updateRoundTrack();}document.getElementById('breathSub').textContent=`Round ${Math.min(breathRound+1,pat.totalRounds)} of ${pat.totalRounds}`;breathTimeout=setTimeout(runBreathPhase,phase.d*1000);}
+function completeBreath(){breathRunning=false;clearInterval(breathCountInterval);stopBreathSound();document.getElementById('breathComplete').style.display='flex';if(window.fbMarkSessionComplete)window.fbMarkSessionComplete('Breathwork',20);}
+function toggleBreathSound(){breathSoundOn=!breathSoundOn;if(breathSoundOn){try{if(!breathSound)breathSound=makeRainSound();fadeIn(breathSound.gain,.12,1.5);document.getElementById('breathSoundBtn').classList.add('on');document.getElementById('breathSoundBtn').textContent='🔊';}catch(e){breathSoundOn=false;}}else stopBreathSound();}
+function stopBreathSound(){if(breathSound){fadeOut(breathSound.gain,1.5);}document.getElementById('breathSoundBtn').classList.remove('on');document.getElementById('breathSoundBtn').textContent='🔇';breathSoundOn=false;}
+function cycleBreathVibe(){breathVibeIdx=(breathVibeIdx+1)%breathVibes.length;document.getElementById('breathCore').textContent=breathVibes[breathVibeIdx];}
+
+// ── YOGA ─────────────────────────────────────────────
+let yogaClass=null,yogaPoseIdx=0,yogaRunning=false,yogaTimer=0,yogaInterval=null,yogaSoundNode=null;
+function openYogaPicker(){document.getElementById('yogaSheet').classList.add('open');}
+function closeSheet(){document.getElementById('yogaSheet').classList.remove('open');}
+function openYogaClass(cls){closeSheet();yogaClass=cls;yogaPoseIdx=0;yogaRunning=false;document.getElementById('yogaClassName').textContent=cls.name+' '+cls.emoji;document.getElementById('yogaProgressFill').style.width='0%';document.getElementById('yogaComplete').style.display='none';document.getElementById('yogaMainBtn').textContent='Start 🌿';loadYogaPose(0);document.getElementById('yogaExp').classList.add('open');}
+function closeYoga(){stopYoga();stopYogaSound();document.getElementById('yogaExp').classList.remove('open');}
+function loadYogaPose(idx){if(!yogaClass)return;const pose=yogaClass.poses[idx];if(!pose){completeYoga();return;}document.getElementById('yogaPoseArt').textContent=pose.e;document.getElementById('yogaPoseName').textContent=pose.n;document.getElementById('yogaPoseCue').textContent=pose.c;document.getElementById('yogaTimerNum').textContent=pose.s;document.getElementById('yogaStepInfo').textContent=`Pose ${idx+1} of ${yogaClass.poses.length}`;document.getElementById('yogaProgressFill').style.width=(idx/yogaClass.poses.length*100)+'%';document.getElementById('yogaTimerArc').style.strokeDashoffset=0;yogaTimer=pose.s;}
+function toggleYoga(){if(yogaRunning){stopYoga();document.getElementById('yogaMainBtn').textContent='Resume 🌿';return;}yogaRunning=true;document.getElementById('yogaMainBtn').textContent='Pause ⏸';runYogaTimer();}
+function stopYoga(){yogaRunning=false;clearInterval(yogaInterval);}
+function runYogaTimer(){if(!yogaRunning)return;const total=yogaClass.poses[yogaPoseIdx].s;clearInterval(yogaInterval);yogaInterval=setInterval(()=>{yogaTimer--;document.getElementById('yogaTimerNum').textContent=yogaTimer;document.getElementById('yogaTimerArc').style.strokeDashoffset=239*(1-yogaTimer/total);if(yogaTimer<=0){clearInterval(yogaInterval);playBowlDing();setTimeout(nextPose,600);}},1000);}
+function nextPose(){yogaPoseIdx++;if(yogaPoseIdx>=yogaClass.poses.length){completeYoga();return;}loadYogaPose(yogaPoseIdx);if(yogaRunning)runYogaTimer();}
+function skipPose(){stopYoga();nextPose();if(yogaRunning)runYogaTimer();}
+function completeYoga(){stopYoga();stopYogaSound();document.getElementById('yogaProgressFill').style.width='100%';document.getElementById('yogaCompleteMsg').textContent=`You completed ${yogaClass.name}! 🎉`;document.getElementById('yogaXPMsg').textContent=`+${yogaClass.xp} XP earned ✨`;document.getElementById('yogaComplete').style.display='flex';if(window.fbMarkSessionComplete)window.fbMarkSessionComplete('Yoga',yogaClass.xp);}
+function toggleYogaSound(type){const btnId='yogaSound'+type.charAt(0).toUpperCase()+type.slice(1);if(document.getElementById(btnId).classList.contains('on')){stopYogaSound();return;}stopYogaSound();try{if(type==='nature')yogaSoundNode=makeForestSound();else if(type==='rain')yogaSoundNode=makeRainSound();else if(type==='bowl'){yogaSoundNode=makeSingingBowl();yogaSoundNode.gain=yogaSoundNode.master;}fadeIn(yogaSoundNode.gain,type==='bowl'?.6:.12,1.5);document.getElementById(btnId).classList.add('on');}catch(e){}}
+function stopYogaSound(){if(yogaSoundNode){fadeOut(yogaSoundNode.gain,1);if(yogaSoundNode.interval)clearInterval(yogaSoundNode.interval);}yogaSoundNode=null;document.querySelectorAll('.yoga-sound-chip').forEach(c=>c.classList.remove('on'));}
+
+// ── MEDITATION ───────────────────────────────────────
+let medRunning=false,medTotal=180,medRemaining=180,medInterval=null,medGuideInterval=null,medSoundKey=null,medSoundNode=null;
+const medGuides={start:["Find a comfortable position. Close your eyes when you're ready. 🌙","Take a deep breath in... and slowly out. Let your body relax 🌊","Feel the weight of your body. You are safe here 💜","With each breath, let go of any tension you're holding 🌿","Your only job right now is to breathe ✨"],mid:["Notice thoughts that come and gently let them pass like clouds ☁️","Return to your breath whenever the mind wanders 🌬️","Feel your chest rise and fall. You are here. Present 🌸","Soften your jaw. Relax your shoulders 💆","You are doing so well. Keep breathing 💜"],end:["Gently bring awareness back to the room 🌅","Wiggle your fingers and toes. Take a deeper breath 🌊","When you're ready, slowly open your eyes 🌸","Carry this stillness with you ✨","Namaste — you gave yourself a gift today 🙏"]};
+function openMeditate(){document.getElementById('meditateExp').classList.add('open');buildMedParticles();setMedDuration(3,document.querySelector('.med-dur-btn'));}
+function openMeditateWithPreset(mins){openMeditate();document.querySelectorAll('.med-dur-btn').forEach(b=>{if(b.textContent===mins+' min')setMedDuration(mins,b);});}
+function closeMeditate(){stopMeditate();stopMedSound();document.getElementById('meditateExp').classList.remove('open');}
+function resetMeditate(){document.getElementById('meditateComplete').style.display='none';medRunning=false;medRemaining=medTotal;updateMedDisplay();}
+function buildMedParticles(){const c=document.getElementById('medParticles');c.innerHTML='';for(let i=0;i<18;i++){const p=document.createElement('div');p.className='med-particle';const sz=2+Math.random()*6;p.style.cssText=`width:${sz}px;height:${sz}px;background:rgba(${150+Math.floor(Math.random()*100)},${100+Math.floor(Math.random()*80)},255,.4);left:${Math.random()*100}%;animation-duration:${6+Math.random()*10}s;animation-delay:${Math.random()*8}s;`;c.appendChild(p);}}
+function setMedDuration(mins,el){medTotal=mins*60;medRemaining=medTotal;document.querySelectorAll('.med-dur-btn').forEach(b=>b.classList.remove('active'));el.classList.add('active');updateMedDisplay();}
+function updateMedDisplay(){const m=Math.floor(medRemaining/60),s=medRemaining%60;document.getElementById('medTimeDisplay').textContent=`${m}:${s.toString().padStart(2,'0')}`;document.getElementById('medTimeLabel').textContent=medRunning?'Session in progress 🌟':'Choose duration & begin';}
+function toggleMeditate(){if(medRunning){stopMeditate();document.getElementById('medMainBtn').textContent='Resume ✨';return;}medRunning=true;document.getElementById('medMainBtn').textContent='Pause ⏸';document.getElementById('medGuide').textContent=medGuides.start[0];let gIdx=0;medGuideInterval=setInterval(()=>{gIdx++;const arr=medRemaining<medTotal*.2?medGuides.end:medRemaining<medTotal*.5?medGuides.mid:medGuides.start;document.getElementById('medGuide').style.opacity=0;setTimeout(()=>{document.getElementById('medGuide').textContent=arr[gIdx%arr.length];document.getElementById('medGuide').style.opacity=1;},500);},15000);medInterval=setInterval(()=>{medRemaining--;updateMedDisplay();if(medRemaining<=0)completeMeditate();},1000);}
+function stopMeditate(){medRunning=false;clearInterval(medInterval);clearInterval(medGuideInterval);}
+function completeMeditate(){stopMeditate();stopMedSound();document.getElementById('meditateComplete').style.display='flex';if(window.fbMarkSessionComplete)window.fbMarkSessionComplete('Meditation',Math.round(medTotal/60)*4);}
+function toggleMedSound(type){const id='medSound'+type.charAt(0).toUpperCase()+type.slice(1);if(medSoundKey===type){stopMedSound();return;}stopMedSound();try{if(type==='rain')medSoundNode=makeRainSound();else if(type==='forest')medSoundNode=makeForestSound();else if(type==='ocean')medSoundNode=makeOceanSound();else if(type==='bowl'){medSoundNode=makeSingingBowl();medSoundNode.gain=medSoundNode.master;}medSoundKey=type;fadeIn(medSoundNode.gain,type==='bowl'?.6:.12,1.5);document.getElementById(id).classList.add('on');}catch(e){}}
+function stopMedSound(){if(medSoundNode){fadeOut(medSoundNode.gain,1.5);if(medSoundNode.interval)clearInterval(medSoundNode.interval);}medSoundNode=null;medSoundKey=null;document.querySelectorAll('.med-sound-card').forEach(c=>c.classList.remove('on'));}
+
+// ── JOURNAL ──────────────────────────────────────────
+let journalSoundOn=false,journalSoundNode=null;
+window.journalEntries=window.journalEntries||[];
+function openJournal(){document.getElementById('journalExp').classList.add('open');document.getElementById('journalDateLabel').textContent=new Date().toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'});buildPaperLines();switchJournalTab('write');}
+function closeJournal(){stopJournalSound();document.getElementById('journalExp').classList.remove('open');}
+function buildPaperLines(){const c=document.getElementById('paperLines');c.innerHTML='';for(let i=0;i<30;i++){const l=document.createElement('div');l.style.cssText=`position:absolute;left:0;right:0;top:${70+i*35.2}px;height:1px;background:rgba(180,160,120,.15);`;c.appendChild(l);}}
+function usePrompt(p){const ta=document.getElementById('journalText');if(ta.value&&!ta.value.endsWith('\n'))ta.value+='\n\n';ta.value+=p+'\n';ta.focus();updateWordCount();switchJournalTab('write');}
+function insertText(t){const ta=document.getElementById('journalText');const pos=ta.selectionStart;ta.value=ta.value.slice(0,pos)+t+ta.value.slice(pos);ta.selectionStart=ta.selectionEnd=pos+t.length;ta.focus();updateWordCount();}
+function updateWordCount(){const w=document.getElementById('journalText').value.trim().split(/\s+/).filter(w=>w).length;document.getElementById('wordCount').textContent=w+' words';}
+function clearJournal(){if(confirm('Clear this entry?')){document.getElementById('journalText').value='';updateWordCount();}}
+async function saveJournalEntry(){const text=document.getElementById('journalText').value.trim();if(!text){showToast('📔 Write something first! 🌸');return;}if(!window.currentUser){showToast('Please sign in to save 🌸');return;}document.querySelector('.j-save-btn').textContent='Saving... ☁️';await window.fbSaveJournalEntry(text);document.getElementById('journalText').value='';updateWordCount();document.querySelector('.j-save-btn').textContent='Save to cloud ☁️';flashSaved();}
+function switchJournalTab(tab){document.getElementById('journalText').style.display=tab==='write'?'block':'none';document.getElementById('journalPastEntries').style.display=tab==='past'?'block':'none';document.getElementById('tabWrite').classList.toggle('active',tab==='write');document.getElementById('tabPast').classList.toggle('active',tab==='past');if(tab==='past')renderPastEntries();}
+function renderPastEntries(){const c=document.getElementById('journalPastEntries');const entries=window.journalEntries||[];if(!entries.length){c.innerHTML='<div style="font-family:Caveat,cursive;font-size:1.1rem;color:rgba(150,120,80,.5);padding:20px 0;text-align:center">No entries yet.<br>Start writing today! 🌸</div>';return;}c.innerHTML=entries.map(e=>`<div class="past-entry"><div class="past-entry-date">${e.dateLabel||'Date unknown'}</div><div class="past-entry-text">${(e.text||'').replace(/</g,'&lt;')}</div></div>`).join('');}
+function toggleJournalSound(){journalSoundOn=!journalSoundOn;const btn=document.getElementById('journalSoundBtn');if(journalSoundOn){try{journalSoundNode=makeForestSound();fadeIn(journalSoundNode.gain,.08,2);btn.classList.add('on');}catch(e){journalSoundOn=false;}}else{if(journalSoundNode){fadeOut(journalSoundNode.gain,1.5);}journalSoundNode=null;btn.classList.remove('on');}}
+function stopJournalSound(){if(journalSoundNode)fadeOut(journalSoundNode.gain,1.5);journalSoundNode=null;journalSoundOn=false;}
+
+// ── PROGRESS CHART ───────────────────────────────────
+let chartBuilt=false;
+function buildChart(){if(chartBuilt)return;chartBuilt=true;const bars=document.getElementById('chartBars');const days=['M','T','W','T','F','S','S'],vals=[8,15,5,22,18,30,12],max=Math.max(...vals);const colors=['#c084fc','#f472b6','#fb923c','#c084fc','#f472b6','#fb923c','#c084fc'];days.forEach((d,i)=>{const wrap=document.createElement('div');wrap.className='chart-bar-wrap';const bar=document.createElement('div');bar.className='chart-bar';bar.style.cssText=`height:4px;background:${colors[i]};border-radius:8px 8px 4px 4px;transition:height .7s cubic-bezier(.34,1.56,.64,1) ${i*.08}s`;const lbl=document.createElement('div');lbl.className='chart-day';lbl.textContent=d;wrap.appendChild(bar);wrap.appendChild(lbl);bars.appendChild(wrap);setTimeout(()=>{bar.style.height=Math.round((vals[i]/max)*72)+'px';},i*80+200);});}
+
+// ── TOAST ────────────────────────────────────────────
+function showToast(msg){let t=document.getElementById('toast');if(!t){t=document.createElement('div');t.id='toast';t.style.cssText=`position:fixed;top:24px;left:50%;transform:translateX(-50%);background:white;padding:12px 20px;border-radius:99px;font-family:'Nunito',sans-serif;font-weight:800;font-size:.82rem;color:#3d3250;box-shadow:0 8px 28px rgba(180,120,200,.25);border:2px solid rgba(200,160,240,.3);z-index:9999;transition:all .35s;max-width:90%;text-align:center;opacity:0`;document.body.appendChild(t);}t.textContent=msg;t.style.opacity='1';t.style.top='24px';clearTimeout(t._to);t._to=setTimeout(()=>{t.style.opacity='0';t.style.top='8px';},2800);}
+
+// init journal date on load
+(()=>{const d=document.getElementById('journalDateLabel');if(d)d.textContent=new Date().toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'});})();
+</script>
+</body>
+</html>
