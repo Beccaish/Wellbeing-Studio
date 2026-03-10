@@ -67,7 +67,7 @@ window._fb = {
     console.log("Signed in:", result.user);
   } catch (e) {
     console.error("Firebase sign-in error:", e);
-    showToast(`Sign-in failed: ${e.code || e.message || "unknown-error"}`);
+    App.toast(`Sign-in failed: ${e.code || e.message || "unknown-error"}`);
   }
 };
 
@@ -76,7 +76,7 @@ window.fbSignOut = async () => {
     await signOut(auth);
   } catch (e) {
     console.error("Sign-out error:", e);
-    showToast("Sign-out failed");
+    App.toast("Sign-out failed");
   }
 };
 
@@ -84,6 +84,8 @@ onAuthStateChanged(auth, async (user) => {
   window.currentUser = user;
 
   if (user) {
+   document.getElementById("loginScreen").style.display = "none";
+document.getElementById("mainApp").style.display = "block";
     document.getElementById("profName").textContent = user.displayName || "Bestie";
 document.getElementById("profHandle").textContent =
   "@" + ((user.email || "").split("@")[0] || "user");
@@ -181,7 +183,7 @@ window.awardXP = async (amount, label) => {
   window.userProgress.sessions = (window.userProgress.sessions || 0) + 1;
   await saveProgress();
   await loadProgress();
-  showToast(`🌟 +${amount} XP — ${label}`);
+  App.toast(`🌟 +${amount} XP — ${label}`);
 };
 
 function getLevelName(lvl) {
@@ -1040,7 +1042,7 @@ document.querySelectorAll('.nav-item').forEach(nav=>{
 /* ─── Auth buttons ─────────────────────────────────── */
 document.getElementById('signInBtn').addEventListener('click', () => window.fbSignIn());
 document.getElementById('signOutBtn').addEventListener('click', () => window.fbSignOut());
-
+  
 /* ─── Home greeting ────────────────────────────────── */
 const hr=new Date().getHours();
 document.getElementById('homeGreeting').textContent=hr<12?'Good morning — let\'s start fresh! ☀️':hr<17?'Good afternoon — take a mindful moment 🌿':'Good evening — wind down beautifully 🌙';
