@@ -137,22 +137,24 @@ onAuthStateChanged(auth, async (user) => {
 // ── Progress ──────────────────────────────────────────
 window.loadProgress = async () => {
   if (!window.currentUser) return;
+
   const ref = doc(db, "users", window.currentUser.uid, "data", "progress");
   const snap = await getDoc(ref);
 
   if (snap.exists()) {
     const d = snap.data();
     window.userProgress = d;
-   document.getElementById("statSessions").textContent = d.sessions || 0;
-document.getElementById("statXP").textContent = d.xp || 0;
+    window._progress = d;
 
-const statSessionsCard = document.getElementById("statSessionsCard");
-const statXPCard = document.getElementById("statXPCard");
+    document.getElementById("statSessions").textContent = d.sessions || 0;
+    document.getElementById("statXP").textContent = d.xp || 0;
 
-if (statSessionsCard) statSessionsCard.textContent = d.sessions || 0;
-if (statXPCard) statXPCard.textContent = d.xp || 0;
+    const statSessionsCard = document.getElementById("statSessionsCard");
+    const statXPCard = document.getElementById("statXPCard");
 
-    
+    if (statSessionsCard) statSessionsCard.textContent = d.sessions || 0;
+    if (statXPCard) statXPCard.textContent = d.xp || 0;
+
     document.getElementById("streakNum").textContent = d.streak || 0;
 
     const days = d.streakDays || [];
@@ -164,11 +166,18 @@ if (statXPCard) statXPCard.textContent = d.xp || 0;
     const lvl = Math.floor(xp / 500) + 1;
     const pct = Math.round(((xp % 500) / 500) * 100);
     const xpBar = document.getElementById("xpBar");
-    if (xpBar) setTimeout(() => { xpBar.style.width = pct + "%"; }, 400);
+    if (xpBar) {
+      setTimeout(() => {
+        xpBar.style.width = pct + "%";
+      }, 400);
+    }
 
-   document.getElementById("progLevelName").textContent = getLevelName(lvl);
-document.getElementById("progXPLabel").textContent = `${xp % 500} / 500 XP — Level ${lvl}`;
+    document.getElementById("progLevelName").textContent = getLevelName(lvl);
+    document.getElementById("progXPLabel").textContent = `${xp % 500} / 500 XP — Level ${lvl}`;
     document.getElementById("welcomeTag").textContent = `✨ Level ${lvl} ${getLevelName(lvl)}`;
+
+    App.refreshProgress();
+
   } else {
     window.userProgress = {
       sessions: 0,
@@ -176,7 +185,10 @@ document.getElementById("progXPLabel").textContent = `${xp % 500} / 500 XP — L
       streak: 0,
       streakDays: [false, false, false, false, false, false, false]
     };
+
+    window._progress = window.userProgress;
     await saveProgress();
+    App.refreshProgress();
   }
 };
 
@@ -202,21 +214,28 @@ function getLevelName(lvl) {
   ];
   return names[Math.min(lvl - 1, names.length - 1)];
 }
-
 // ── Journal ───────────────────────────────────────────
 window.loadJournalEntries = async () => {
   if (!window.currentUser) return;
+
   const ref = collection(db, "users", window.currentUser.uid, "journal");
   const q = query(ref, orderBy("createdAt", "desc"));
   const snap = await getDocs(q);
+
   window.journalEntries = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  window._journal = window.journalEntries;
+
   const cnt = document.getElementById("journalCount");
   if (cnt) cnt.textContent = window.journalEntries.length;
+
   App.renderPastEntries();
+  App.refreshJournalCount();
+  App.refreshProgress();
 };
 
 window.fbSaveJournalEntry = async (text, mood) => {
   if (!window.currentUser) return;
+
   const ref = collection(db, "users", window.currentUser.uid, "journal");
   await addDoc(ref, {
     text,
@@ -229,10 +248,10 @@ window.fbSaveJournalEntry = async (text, mood) => {
       year: "numeric"
     })
   });
+
   await loadJournalEntries();
   await awardXP(15, "Journal entry saved!");
 };
-
 // ── Checklist ─────────────────────────────────────────
 window.loadChecklist = async () => {
   if (!window.currentUser) return;
