@@ -83,12 +83,16 @@ window.fbSignOut = async () => {
 onAuthStateChanged(auth, async (user) => {
   window.currentUser = user;
 
-  if (user) {
+if (user) {
   document.getElementById("loginScreen").style.display = "none";
   document.getElementById("mainApp").style.display = "block";
 
   const bottomNav = document.getElementById("bottomNav");
   if (bottomNav) bottomNav.style.display = "flex";
+
+  // ADD THESE TWO LINES
+  window.currentUser = user;
+  window._uid = user.uid;
 
   document.getElementById("profName").textContent = user.displayName || "Bestie";
   document.getElementById("profHandle").textContent =
@@ -113,6 +117,7 @@ onAuthStateChanged(auth, async (user) => {
     if (profEmoji) profEmoji.style.display = "none";
   }
 
+  
   document.getElementById("welcomeName").textContent =
     ((user.displayName || "Bestie").split(" ")[0]) + "!";
 
