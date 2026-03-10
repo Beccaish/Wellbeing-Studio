@@ -81,49 +81,57 @@ window.fbSignOut = async () => {
 };
 
 onAuthStateChanged(auth, async (user) => {
-  window.currentUser = user;
+  if (user) {
+    document.getElementById("loginScreen").style.display = "none";
+    document.getElementById("mainApp").style.display = "block";
 
-if (user) {
-  document.getElementById("loginScreen").style.display = "none";
-  document.getElementById("mainApp").style.display = "block";
+    const bottomNav = document.getElementById("bottomNav");
+    if (bottomNav) bottomNav.style.display = "flex";
 
-  const bottomNav = document.getElementById("bottomNav");
-  if (bottomNav) bottomNav.style.display = "flex";
+    window.currentUser = user;
+    window._uid = user.uid;
 
-  // ADD THESE TWO LINES
-  window.currentUser = user;
-  window._uid = user.uid;
+    document.getElementById("profName").textContent = user.displayName || "Bestie";
+    document.getElementById("profHandle").textContent =
+      "@" + ((user.email || "").split("@")[0] || "user");
 
-  document.getElementById("profName").textContent = user.displayName || "Bestie";
-  document.getElementById("profHandle").textContent =
-    "@" + ((user.email || "").split("@")[0] || "user");
+    if (user.photoURL) {
+      const welcomeImg = document.getElementById("welcomeAvatarImg");
+      const welcomeEmoji = document.getElementById("welcomeAvatarEmoji");
+      const profImg = document.getElementById("profAvatarImg");
+      const profEmoji = document.getElementById("profAvatarEmoji");
 
-  if (user.photoURL) {
-    const welcomeImg = document.getElementById("welcomeAvatarImg");
-    const welcomeEmoji = document.getElementById("welcomeAvatarEmoji");
-    const profImg = document.getElementById("profAvatarImg");
-    const profEmoji = document.getElementById("profAvatarEmoji");
+      if (welcomeImg) {
+        welcomeImg.src = user.photoURL;
+        welcomeImg.style.display = "block";
+      }
+      if (welcomeEmoji) welcomeEmoji.style.display = "none";
 
-    if (welcomeImg) {
-      welcomeImg.src = user.photoURL;
-      welcomeImg.style.display = "block";
+      if (profImg) {
+        profImg.src = user.photoURL;
+        profImg.style.display = "block";
+      }
+      if (profEmoji) profEmoji.style.display = "none";
     }
-    if (welcomeEmoji) welcomeEmoji.style.display = "none";
 
-    if (profImg) {
-      profImg.src = user.photoURL;
-      profImg.style.display = "block";
-    }
-    if (profEmoji) profEmoji.style.display = "none";
+    document.getElementById("welcomeName").textContent =
+      ((user.displayName || "Bestie").split(" ")[0]) + "!";
+
+    await loadProgress();
+    await loadJournalEntries();
+    await loadChecklist();
+  } else {
+    document.getElementById("loginScreen").style.display = "flex";
+    document.getElementById("mainApp").style.display = "none";
+
+    const bottomNav = document.getElementById("bottomNav");
+    if (bottomNav) bottomNav.style.display = "none";
+
+    window.currentUser = null;
+    window._uid = null;
   }
-
+});
   
-  document.getElementById("welcomeName").textContent =
-    ((user.displayName || "Bestie").split(" ")[0]) + "!";
-
-  window.currentUser = user;
-  window._uid = user.uid;
-
   await loadProgress();
   await loadJournalEntries();
   await loadChecklist();
